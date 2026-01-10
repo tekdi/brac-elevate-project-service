@@ -1,0 +1,70 @@
+name: Dev Build & Deploy Projec Service (BRAC)
+on:
+  push:
+    branches:
+      - develop
+env:
+  AWS_REGION: ${{ secrets.AWS_REGION }}
+  ECR_REPOSITORY: ${{ secrets.ECR_REPOSITORY_BRAC }}
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: read
+      id-token: write   # Required for OIDC
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      # =========================
+      # AWS Authentication
+      # =========================
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+         aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+         aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+         aws-region: ${{ env.AWS_REGION }}
+
+      # =========================
+      # Login to ECR
+      # =========================
+      - name: Login to Amazon ECR
+        uses: aws-actions/amazon-ecr-login@v2
+
+      # =========================
+      # Build & Push Image
+      # =========================
+      - name: Build and Push Docker Image to ECR
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: true
+          tags: |
+            ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/${{ env.ECR_REPOSITORY }}:latest
+            ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/${{ env.ECR_REPOSITORY }}:${{ github.sha }}
+
+      # =========================
+      # Deploy on Server
+      # =========================
+      - name: Deploy Stack
+        uses: appleboy/ssh-action@master
+        with:
+          host: ${{ secrets.HOST_NAME_DEV }}
+          username: ${{ secrets.USERNAME_DEV }}
+          key: ${{ secrets.SSH_KEY_DEV }}
+          port: ${{ secrets.PORT_DEV }}
+          script: |
+            cd ${{ secrets.TARGET_DIR_DEV }}
+
+            if [ -f .env ]; then
+              mv .env .env-bkp 
+            fi
+
+            echo '${{ secrets.DEV_ENV_BRAC }}' > .env
+            ls -ltra
+            aws ecr get-login-password --region {{ env.AWS_REGION }} | docker login --username AWS --password-stdin ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com
+            ./deploy.sh
