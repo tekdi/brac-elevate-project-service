@@ -368,7 +368,7 @@ module.exports = class programUsers {
 		return new Promise(async (resolve, reject) => {
 			try {
 				// Build query: use programId if available, otherwise programExternalId
-				const query = { userId, tenantId }
+				const query = { userId: userId.toString(), tenantId: tenantId }
 				if (programId) {
 					query.programId = programId
 				} else if (programExternalId) {
@@ -435,7 +435,7 @@ module.exports = class programUsers {
 				// Build the query with the specific matching field
 				// The positional operator requires the array matching condition to be directly in the query
 				const updateQuery = { ...query }
-				updateQuery[matchField] = entityId
+				updateQuery[matchField] = entityId.toString()
 
 				// Perform the update
 				const result = await database.models.programUsers.findOneAndUpdate(
