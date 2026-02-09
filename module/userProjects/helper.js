@@ -425,7 +425,6 @@ module.exports = class UserProjectsHelper {
 
 					updateProject['taskReport'] = taskReport
 				}
-
 				Object.keys(data).forEach((updateData) => {
 					if (!updateProject[updateData] && projectsModel.includes(updateData)) {
 						if (booleanData.includes(updateData)) {
@@ -495,6 +494,7 @@ module.exports = class UserProjectsHelper {
 					userId: userId,
 					projects: projectUpdated,
 				}
+
 				//  push project details to kafka
 				await this.attachEntityInformationIfExists(projectUpdated)
 				const kafkaPushedProject = await kafkaProducersHelper.pushProjectToKafka(projectUpdated)
@@ -1152,6 +1152,8 @@ module.exports = class UserProjectsHelper {
 			try {
 				let updateSubmission = []
 
+				let isAProjectPlan = false
+				let currentTask = null
 				let projectDocument = await projectQueries.projectDocument(
 					{
 						_id: projectId,
@@ -1160,7 +1162,31 @@ module.exports = class UserProjectsHelper {
 					['tasks']
 				)
 
-				let currentTask = projectDocument[0].tasks.find((task) => task._id == taskId)
+				if (!projectDocument.length > 0) {
+					projectDocument = await projectQueries.projectDocument(
+						{
+							_id: projectId,
+							'tasks.children._id': taskId,
+						},
+						['tasks']
+					)
+					if (!projectDocument.length > 0) {
+						throw {
+							status: HTTP_STATUS_CODE.bad_request.status,
+							message: CONSTANTS.apiResponses.USER_PROJECT_NOT_FOUND,
+						}
+					}
+					isAProjectPlan = true
+				}
+
+				if (isAProjectPlan) {
+					currentTask = projectDocument[0].tasks
+						.flatMap((task) => task.children || [])
+						.find((childTask) => childTask._id == taskId)
+				} else {
+					currentTask = projectDocument[0].tasks.find((task) => task._id == taskId)
+				}
+
 				let submissions =
 					currentTask.submissions && currentTask.submissions.length > 0 ? currentTask.submissions : []
 
@@ -1181,21 +1207,71 @@ module.exports = class UserProjectsHelper {
 					updateSubmission = submissions
 				}
 
-				let tasksUpdated = await projectQueries.findOneAndUpdate(
-					{
-						_id: projectId,
-						'tasks._id': taskId,
-					},
-					{
-						$set: {
-							'tasks.$.submissions': updateSubmission,
-						},
+				let tasksUpdated
+				if (!isAProjectPlan) {
+					let updateFields = {
+						'tasks.$.submissions': updateSubmission,
+						'tasks.$.updatedAt': new Date(),
 					}
-				)
+					if (process.env.PUSH_SUBMISION_STATUS_TO_TASK === 'true') {
+						updateFields['tasks.$.status'] = updatedData.status
+					}
+					tasksUpdated = await projectQueries.findOneAndUpdate(
+						{
+							_id: projectId,
+							'tasks._id': taskId,
+						},
+						{
+							$set: updateFields,
+						}
+					)
+				} else {
+					const updateFields = {
+						'tasks.$[task].children.$[child].submissions': updateSubmission,
+						'tasks.$[task].children.$[child].updatedAt': new Date(),
+					}
 
+					if (process.env.PUSH_SUBMISION_STATUS_TO_TASK === 'true') {
+						updateFields['tasks.$[task].children.$[child].status'] = updatedData.status
+					}
+
+					tasksUpdated = await projectQueries.findOneAndUpdate(
+						{
+							_id: projectId,
+						},
+						{
+							$set: updateFields,
+						},
+						{
+							arrayFilters: [{ 'task.children._id': taskId }, { 'child._id': taskId }],
+						}
+					)
+					// const parentTask = projectDocument[0].tasks.find((task) =>
+					// 	task.children?.some((childTask) => String(childTask._id) === String(taskId))
+					// );
+					// if (parentTask && process.env.PUSH_SUBMISION_STATUS_TO_TASK === 'true') {
+					// 	await checkAndCompleteParentTask(projectId, parentTask._id);
+					// }
+				}
+
+				if (process.env.PUSH_SUBMISION_STATUS_TO_TASK === 'true') {
+					const completeProject = await checkAndCompleteProject(projectId)
+
+					if (process.env.ENABLE_PROGRAM_USER_MAPPING === 'true') {
+						await this.updateProgramUserMapping(projectId)
+					}
+				}
+
+				if (!tasksUpdated._id) {
+					throw {
+						status: HTTP_STATUS_CODE.bad_request.status,
+						message: CONSTANTS.apiResponses.USER_PROJECT_NOT_UPDATED,
+					}
+				}
 				return resolve({
 					success: true,
-					data: tasksUpdated,
+					message: CONSTANTS.apiResponses.USER_PROJECT_UPDATED,
+					result: tasksUpdated._id,
 				})
 			} catch (error) {
 				return reject(error)
@@ -1203,6 +1279,99 @@ module.exports = class UserProjectsHelper {
 		})
 	}
 
+	static updateProgramUserMapping(projectId) {
+		return new Promise(async (resolve, reject) => {
+			try {
+				let resp
+				const progressStats = await getTaskCompletionStats(projectId)
+
+				const projects = await projectQueries.projectDocument({ _id: projectId }, [
+					'userId',
+					'programId',
+					'programExternalId',
+					'referenceFrom',
+					'createdBy',
+					'entityId',
+					'tenantId',
+				])
+				if (!projects.length > 0) {
+					throw {
+						status: HTTP_STATUS_CODE.bad_request.status,
+						message: CONSTANTS.apiResponses.USER_PROJECT_NOT_FOUND,
+					}
+				}
+				const project = projects[0]
+
+				// if (project?.metaInformation?.programUserMappingRef) {
+				// 	const programUserMappingRef = project.metaInformation.programUserMappingRef;
+				// if project is  created by the user, then update the entity in the program user mapping
+				let userId = project.createdBy
+				resp = await programUsersService.programUsersDocument(
+					{ userId: project.createdBy, programId: project.programId },
+					['_id', 'entities']
+				)
+				if (resp.length > 0) {
+					//if (project.userId != project.createdBy) {
+					const entity = resp[0].entities.find((entity) => entity.entityId === project.entityId)
+					if (entity) {
+						//entity.status = (project.status === CONSTANTS.common.COMPLETED_STATUS) ? "ONBOARDED" : "IN_PROGRESS";
+						if (entity.status === 'IN_PROGRESS' && entity.idpProjectId == project._id) {
+							statusUpdate = {
+								idpProgress: progressStats,
+								status: 'IN_PROGRESS',
+							}
+							if (progressStats.projectStatus === 'completed') {
+								statusUpdate.status = 'COMPLETED'
+							}
+
+							await programUsersService.updateEntity(
+								resp[0]._id,
+								'',
+								'',
+								'',
+								project.entityId,
+								statusUpdate
+							)
+
+							if (project.userId != project.createdBy) {
+								//userId = project.createdBy;
+								//updateSpecificEntity = true;
+
+								const resp1 = await programUsersService.createOrUpdate(
+									{ userId: project.userId, programId: project.programId },
+									{ metaInformation: { idpProgress: progressStats }, status: statusUpdate.status }
+								)
+							}
+						}
+						if (
+							entity.status === 'NOT_ONBOARDED' &&
+							entity.onBoardedProjectId.toString() === project._id.toString()
+						) {
+							await programUsersService.updateEntity(
+								project.createdBy,
+								project.programId,
+								'',
+								project.entityId,
+								{
+									onBoardingProgress: progressStats,
+								},
+								project.tenantId
+							)
+						}
+					}
+					return resolve({
+						success: true,
+						message: 'Program user mapping handled successfully',
+					})
+				}
+			} catch (error) {
+				return resolve({
+					success: true,
+					message: 'Program user mapping handled successfully',
+				})
+			}
+		})
+	}
 	/**
 	 * Solutions details
 	 * @method
@@ -1982,6 +2151,7 @@ module.exports = class UserProjectsHelper {
 							userId: userId,
 							projects: project,
 						}
+						//await this.addProgramUserMappingReference(project)
 						await this.attachEntityInformationIfExists(project)
 						await kafkaProducersHelper.pushProjectToKafka(project)
 						await kafkaProducersHelper.pushUserActivitiesToKafka(kafkaUserProject)
@@ -4318,6 +4488,15 @@ module.exports = class UserProjectsHelper {
 	static update(projectId, updateData, userId, appName = '', appVersion = '', userDetails) {
 		return new Promise(async (resolve, reject) => {
 			try {
+				// if (updateData.taskId && updateData.noSyncCallBack) {
+				// 	const progressStats = await this.updateTask(projectId, updateData.taskId, updateData)
+				// 	return resolve({
+				// 		success: true,
+				// 		message: 'Task updated successfully',
+				// 		result: progressStats,
+				// 	})
+				// }
+
 				const userProject = await projectQueries.projectDocument(
 					{
 						_id: projectId,
@@ -4359,6 +4538,11 @@ module.exports = class UserProjectsHelper {
 					appVersion,
 					true
 				)
+				const completeProject = await checkAndCompleteProject(projectId)
+				const progress = await getTaskCompletionStats(projectId)
+				if (process.env.ENABLE_PROGRAM_USER_MAPPING === 'true') {
+					await this.updateProgramUserMapping(projectId)
+				}
 
 				if (updateResult.message == CONSTANTS.apiResponses.USER_PROJECT_UPDATED) {
 					return resolve({
@@ -4366,6 +4550,7 @@ module.exports = class UserProjectsHelper {
 						success: true,
 						result: {
 							_id: projectId,
+							progress: progress,
 						},
 					})
 				} else {
@@ -5003,11 +5188,11 @@ module.exports = class UserProjectsHelper {
 
 				// Push to Kafka for event streaming
 				await this.attachEntityInformationIfExists(createdProject)
-				let programUserMapping = await this.handleProgramUserMapping({
-					userId: participantId,
-					project: createdProject,
-				})
-				console.log('Program User Mapping Result:*****************', programUserMapping)
+				// let programUserMapping = await createProgramUserMapping({
+				// 	userId: participantId,
+				// 	project: createdProject,
+				// })
+				//console.log('Program User Mapping Result:*****************', programUserMapping)
 				await kafkaProducersHelper.pushProjectToKafka(createdProject)
 				await kafkaProducersHelper.pushUserActivitiesToKafka({
 					userId: participantId,
@@ -5033,8 +5218,54 @@ module.exports = class UserProjectsHelper {
 		})
 	}
 
+	static async addProgramUserMappingReference(project) {
+		return new Promise(async (resolve, reject) => {
+			try {
+				// let project = await projectQueries.projectDocument({ _id: projectId }, ['_id','userId', 'createdBy','programId','programExternalId','programUserMappingReference'])
+				// if (!project.length > 0) {
+				// 	throw {
+				// 		status: HTTP_STATUS_CODE.bad_request.status,
+				// 		message: CONSTANTS.apiResponses.USER_PROJECT_NOT_FOUND,
+				// 	}
+				// }
+				if (!project?.programUserMappingReference) {
+					let pudoc = await programUsersService.programUsersDocument(
+						{
+							programId: project.programId,
+							userId: project.userId != project.createdBy ? project.createdBy : project.userId,
+						},
+						['_id']
+					)
+					if (!pudoc.length > 0) {
+						throw {
+							status: HTTP_STATUS_CODE.bad_request.status,
+							message: CONSTANTS.apiResponses.PROGRAM_USER_NOT_FOUND,
+						}
+					}
+					project.programUserMappingReference = pudoc[0]._id
+					await projectQueries.findOneAndUpdate(
+						{ _id: project._Id },
+						{ $set: { programUserMappingReference: pudoc[0]._id } }
+					)
+					return resolve({
+						success: true,
+						message: CONSTANTS.apiResponses.PROGRAM_USER_MAPPING_REFERENCE_ADDED,
+						data: {
+							programUserMappingReference: pudoc[0]._id,
+						},
+					})
+				}
+			} catch (error) {
+				return reject({
+					status: error.status ? error.status : HTTP_STATUS_CODE.internal_server_error.status,
+					message: error.message || error,
+				})
+			}
+		})
+	}
+
 	/*Add user to program user mapping on project creation*/
-	static async handleProgramUserMapping(eventData) {
+	static async createProgramUserMapping(eventData) {
 		return new Promise(async (resolve, reject) => {
 			try {
 				let { userId, project } = eventData
@@ -5048,6 +5279,7 @@ module.exports = class UserProjectsHelper {
 						id: createdBy,
 					})
 				}
+
 				//let programUsersRef = await programUsersService.findByUserAndProgram(userId, projectProgramId);
 				//if (!programUsersRef) {
 				let result = await programUsersService.createOrUpdate({
@@ -5064,7 +5296,8 @@ module.exports = class UserProjectsHelper {
 					},
 					createdBy: createdBy,
 					updatedBy: createdBy,
-					referenceFrom: project.referenceFrom ? new ObjectId(project.referenceFrom) : null,
+					//referenceFrom: project.referenceFrom ? new ObjectId(project.referenceFrom) : null,
+
 					tenantId: project.tenantId,
 					orgId: project.orgId,
 				})
@@ -5080,7 +5313,7 @@ module.exports = class UserProjectsHelper {
 							{
 								status: 'IN_PROGRESS',
 								idpProjectId: project._id,
-								participantProgramUserReference: result.result._id,
+								UserprogramUserReference: result.result._id,
 							},
 							project.tenantId
 						)
@@ -5222,6 +5455,124 @@ module.exports = class UserProjectsHelper {
 				})
 			}
 		})
+	}
+
+	/**
+	 * Update task status and attachments with cascading parent/project completion
+	 * @param {String} projectId - Project ID
+	 * @param {String} taskId - Task ID to update
+	 * @param {Object} updateData - { status: 'completed', attachments: [...] }
+	 */
+	static async updateTask(projectId, taskId, updateData) {
+		const { status, attachments } = updateData
+
+		// Step 1: Find the project and determine if it's a direct task or child task
+		let isAProjectPlan = false
+		let project = await projectQueries.projectDocument(
+			{
+				_id: projectId,
+				'tasks._id': taskId,
+			},
+			['tasks._id', 'tasks.status', 'tasks.children._id', 'tasks.children.status', 'status']
+		)
+
+		if (!project.length > 0) {
+			project = await projectQueries.projectDocument(
+				{
+					_id: projectId,
+					'tasks.children._id': taskId,
+				},
+				['tasks._id', 'tasks.status', 'tasks.children._id', 'tasks.children.status', 'status']
+			)
+
+			if (!project.length > 0) {
+				throw {
+					status: HTTP_STATUS_CODE.bad_request.status,
+					message: CONSTANTS.apiResponses.USER_PROJECT_NOT_FOUND,
+				}
+			}
+			isAProjectPlan = true
+		}
+
+		let parentTaskId = null
+
+		// Step 2: Update the task
+		if (!isAProjectPlan) {
+			// Update direct task
+			const updateFields = {
+				'tasks.$.status': status,
+				'tasks.$.updatedAt': new Date(),
+			}
+
+			if (attachments && attachments.length > 0) {
+				updateFields['tasks.$.attachments'] = attachments
+			}
+
+			const projectUpdated = await projectQueries.findOneAndUpdate(
+				{
+					_id: projectId,
+					'tasks._id': taskId,
+				},
+				{ $set: updateFields }
+			)
+
+			if (!projectUpdated._id) {
+				throw {
+					message: CONSTANTS.apiResponses.USER_PROJECT_NOT_UPDATED,
+					status: HTTP_STATUS_CODE.internal_server_error.status,
+				}
+			}
+		} else {
+			// Update child task
+			const parentTask = project[0].tasks.find((task) =>
+				task.children?.some((childTask) => String(childTask._id) === String(taskId))
+			)
+
+			if (!parentTask) {
+				throw {
+					status: HTTP_STATUS_CODE.bad_request.status,
+					message: 'Parent task not found',
+				}
+			}
+
+			parentTaskId = parentTask._id
+
+			const updateFields = {
+				'tasks.$[task].children.$[child].status': status,
+				'tasks.$[task].children.$[child].updatedAt': new Date(),
+			}
+
+			if (attachments && attachments.length > 0) {
+				updateFields['tasks.$[task].children.$[child].attachments'] = attachments
+			}
+
+			await projectQueries.findOneAndUpdate(
+				{ _id: projectId },
+				{ $set: updateFields },
+				{
+					arrayFilters: [{ 'task._id': parentTaskId }, { 'child._id': taskId }],
+				}
+			)
+
+			// Step 3: Check if all siblings are completed and mark parent as completed
+			if (status === 'completed') {
+				await checkAndCompleteParentTask(projectId, parentTaskId)
+			}
+		}
+
+		// Step 4: Check if all parent tasks are completed and mark project as completed
+		if (status === 'completed') {
+			await checkAndCompleteProject(projectId)
+		}
+
+		const progressStats = await getTaskCompletionStats(projectId)
+
+		// Step 5: Report task progress after update
+		return {
+			success: true,
+			message: 'Task updated successfully',
+			result: progressStats,
+		}
 	}
 }
 
@@ -6494,4 +6845,220 @@ function _updateUserProfileBasedOnUserRoleInfo(userProfile, userRoleInformation)
 			})
 		}
 	})
+}
+
+/**
+ * Calculate and return task completion statistics with individual task breakdown
+ * @param {String} projectId - Project ID
+ * @returns {Object} - Overall stats + individual task progress
+ */
+async function getTaskCompletionStats(projectId) {
+	const project = await projectQueries.projectDocument({ _id: projectId }, [
+		'tasks._id',
+		'tasks.name',
+		'tasks.status',
+		'tasks.children._id',
+		'tasks.children.status',
+		'status',
+	])
+
+	if (!project.length > 0) {
+		throw {
+			status: HTTP_STATUS_CODE.bad_request.status,
+			message: CONSTANTS.apiResponses.USER_PROJECT_NOT_FOUND,
+		}
+	}
+
+	let totalTasks = 0
+	let completedTasks = 0
+	const taskProgress = {} // Individual task progress
+
+	project[0].tasks.forEach((task) => {
+		const taskId = String(task._id)
+
+		if (task.children && task.children.length > 0) {
+			// Parent task with children - track children progress
+			let taskTotalChildren = 0
+			let taskCompletedChildren = 0
+
+			task.children.forEach((child) => {
+				taskTotalChildren++
+				totalTasks++
+
+				if (child.status === 'completed') {
+					taskCompletedChildren++
+					completedTasks++
+				}
+			})
+
+			// Calculate completion percentage for this parent task
+			const taskCompletionPercentage =
+				taskTotalChildren > 0 ? ((taskCompletedChildren / taskTotalChildren) * 100).toFixed(2) : 0
+
+			// Store individual task progress
+			taskProgress[taskId] = {
+				taskId: taskId,
+				totalTasks: taskTotalChildren,
+				completedTasks: taskCompletedChildren,
+				completionPercentage: parseFloat(taskCompletionPercentage),
+				status: task.status || 'notStarted',
+			}
+		} else {
+			// Direct task without children
+			totalTasks++
+			if (task.status === 'completed') {
+				completedTasks++
+			}
+		}
+	})
+
+	// Calculate overall completion percentage
+	const overallCompletionPercentage = totalTasks > 0 ? ((completedTasks / totalTasks) * 100).toFixed(2) : 0
+
+	const progressStats = {
+		// Overall project progress
+		totalTasks,
+		completedTasks,
+		remainingTasks: totalTasks - completedTasks,
+		completionPercentage: parseFloat(overallCompletionPercentage),
+		projectStatus: project[0].status || 'notStarted',
+
+		// Individual task progress (keyed by task ID)
+		tasks: taskProgress,
+	}
+	return progressStats
+}
+
+// /**
+//  * Log or send task completion statistics
+//  * This can be used for analytics, notifications, or progress tracking
+//  */
+// async function reportTaskProgress(projectId, context = {}) {
+//     const stats = await getTaskCompletionStats(projectId);
+
+//     // Log the statistics
+//     console.log(`Project ${projectId} Progress:`, {
+//         ...stats,
+//         context,
+//         timestamp: new Date().toISOString(),
+//     });
+
+//     // Optional: Send to analytics service, notification service, etc.
+//     // await analyticsService.trackProgress(projectId, stats);
+//     // await notificationService.sendProgressUpdate(projectId, stats);
+
+//     return stats;
+// }
+
+/**
+ * Check if all children of a parent task are completed, if yes mark parent as completed
+ */
+async function checkAndCompleteParentTask(projectId, parentTaskId) {
+	const project = await projectQueries.projectDocument(
+		{
+			_id: projectId,
+			'tasks._id': parentTaskId,
+		},
+		['tasks._id', 'tasks.children._id', 'tasks.children.status', 'tasks.status']
+	)
+
+	if (!project.length > 0) {
+		return
+	}
+
+	const parentTask = project[0].tasks.find((t) => String(t._id) === String(parentTaskId))
+
+	if (!parentTask || !parentTask.children || parentTask.children.length === 0) {
+		return
+	}
+
+	// Check if all children are completed
+	const allChildrenCompleted = parentTask.children.every((child) => child.status === 'completed')
+
+	if (allChildrenCompleted && parentTask.status !== 'completed') {
+		// Mark parent task as completed
+		await projectQueries.findOneAndUpdate(
+			{
+				_id: projectId,
+				'tasks._id': parentTaskId,
+			},
+			{
+				$set: {
+					'tasks.$.status': 'completed',
+					'tasks.$.updatedAt': new Date(),
+				},
+			}
+		)
+	}
+}
+
+/**
+ * Check if all tasks are completed, if yes mark project as completed
+ */
+async function checkAndCompleteProject(projectId) {
+	const project = await projectQueries.projectDocument({ _id: projectId }, [
+		'tasks._id',
+		'tasks.status',
+		'tasks.children._id',
+		'tasks.children.status',
+		'status',
+	])
+
+	if (!project.length > 0) {
+		return
+	}
+
+	// Step 1: Check and complete parent tasks if all their children are completed
+	for (const task of project[0].tasks) {
+		if (task.children && task.children.length > 0) {
+			// Check if all children are completed
+			const allChildrenCompleted = task.children.every((child) => child.status === 'completed')
+
+			// If all children completed but parent is not, mark parent as completed
+			if (allChildrenCompleted && task.status !== 'completed') {
+				await projectQueries.findOneAndUpdate(
+					{
+						_id: projectId,
+						'tasks._id': task._id,
+					},
+					{
+						$set: {
+							'tasks.$.status': 'completed',
+							'tasks.$.updatedAt': new Date(),
+						},
+					}
+				)
+			}
+		}
+	}
+
+	// Step 2: Fetch updated project data to check if all parent tasks are now completed
+	const updatedProject = await projectQueries.projectDocument({ _id: projectId }, [
+		'tasks._id',
+		'tasks.status',
+		'tasks.children._id',
+		'tasks.children.status',
+		'status',
+	])
+
+	if (!updatedProject.length > 0) {
+		return
+	}
+
+	// Check if all parent tasks are completed
+	const allTasksCompleted = updatedProject[0].tasks.every((task) => task.status === 'completed')
+
+	// Step 3: Mark project as completed if all parent tasks are completed
+	if (allTasksCompleted && updatedProject[0].status !== 'completed') {
+		await projectQueries.findOneAndUpdate(
+			{ _id: projectId },
+			{
+				$set: {
+					status: 'completed',
+					updatedAt: new Date(),
+				},
+			}
+		)
+	}
+	return true
 }
