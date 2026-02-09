@@ -244,6 +244,9 @@ module.exports = {
 			index: true,
 			required: true,
 		},
+		programUserMappingReference: {
+			type: 'ObjectId',
+		},
 	},
 	compoundIndex: [
 		{
