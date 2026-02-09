@@ -2151,7 +2151,6 @@ module.exports = class UserProjectsHelper {
 							userId: userId,
 							projects: project,
 						}
-						//await this.addProgramUserMappingReference(project)
 						await this.attachEntityInformationIfExists(project)
 						await kafkaProducersHelper.pushProjectToKafka(project)
 						await kafkaProducersHelper.pushUserActivitiesToKafka(kafkaUserProject)
@@ -5218,129 +5217,6 @@ module.exports = class UserProjectsHelper {
 		})
 	}
 
-	static async addProgramUserMappingReference(project) {
-		return new Promise(async (resolve, reject) => {
-			try {
-				// let project = await projectQueries.projectDocument({ _id: projectId }, ['_id','userId', 'createdBy','programId','programExternalId','programUserMappingReference'])
-				// if (!project.length > 0) {
-				// 	throw {
-				// 		status: HTTP_STATUS_CODE.bad_request.status,
-				// 		message: CONSTANTS.apiResponses.USER_PROJECT_NOT_FOUND,
-				// 	}
-				// }
-				if (!project?.programUserMappingReference) {
-					let pudoc = await programUsersService.programUsersDocument(
-						{
-							programId: project.programId,
-							userId: project.userId != project.createdBy ? project.createdBy : project.userId,
-						},
-						['_id']
-					)
-					if (!pudoc.length > 0) {
-						throw {
-							status: HTTP_STATUS_CODE.bad_request.status,
-							message: CONSTANTS.apiResponses.PROGRAM_USER_NOT_FOUND,
-						}
-					}
-					project.programUserMappingReference = pudoc[0]._id
-					await projectQueries.findOneAndUpdate(
-						{ _id: project._Id },
-						{ $set: { programUserMappingReference: pudoc[0]._id } }
-					)
-					return resolve({
-						success: true,
-						message: CONSTANTS.apiResponses.PROGRAM_USER_MAPPING_REFERENCE_ADDED,
-						data: {
-							programUserMappingReference: pudoc[0]._id,
-						},
-					})
-				}
-			} catch (error) {
-				return reject({
-					status: error.status ? error.status : HTTP_STATUS_CODE.internal_server_error.status,
-					message: error.message || error,
-				})
-			}
-		})
-	}
-
-	/*Add user to program user mapping on project creation*/
-	static async createProgramUserMapping(eventData) {
-		return new Promise(async (resolve, reject) => {
-			try {
-				let { userId, project } = eventData
-				let createdBy = project.createdBy
-				let projectProgramId = project.programId
-				let programExternalId = project.programExternalId
-				let hierarchy = []
-				if (userId != createdBy) {
-					hierarchy.push({
-						level: 0,
-						id: createdBy,
-					})
-				}
-
-				//let programUsersRef = await programUsersService.findByUserAndProgram(userId, projectProgramId);
-				//if (!programUsersRef) {
-				let result = await programUsersService.createOrUpdate({
-					userId: userId,
-					hierarchy: hierarchy,
-					programId: projectProgramId,
-					programExternalId: programExternalId,
-					entities: [],
-					status: 'IN_PROGRESS',
-					metaInformation: {
-						idpAssignedAt: new Date(),
-						idpAssignedBy: createdBy,
-						idpProjectId: project._id,
-					},
-					createdBy: createdBy,
-					updatedBy: createdBy,
-					//referenceFrom: project.referenceFrom ? new ObjectId(project.referenceFrom) : null,
-
-					tenantId: project.tenantId,
-					orgId: project.orgId,
-				})
-
-				if (result.result._id) {
-					console.log('PARTICIPANT_PROGRAMUSERS_ASSIGNED', result.result._id)
-					if (project.referenceFrom) {
-						let result2 = await programUsersService.updateEntity(
-							createdBy,
-							project.referenceFrom,
-							'',
-							`${userId}`,
-							{
-								status: 'IN_PROGRESS',
-								idpProjectId: project._id,
-								UserprogramUserReference: result.result._id,
-							},
-							project.tenantId
-						)
-						if (result2._id) {
-							console.log('LC_PROGRAMUSERS_ENTITY_UPDATED', result2._id)
-						} else {
-							console.log('LC_PROGRAMUSERS_ENTITY_ASSIGNMENT_FAILED', result2)
-						}
-					}
-				} else {
-					console.log('PARTICIPANT_PROGRAMUSERS_ASSIGNMENT_FAILED', result.result)
-				}
-
-				return resolve({
-					success: true,
-					message: 'Program user mapping handled successfully',
-					result: result.result,
-				})
-			} catch (error) {
-				return reject({
-					success: false,
-					status: error.status ? error.status : HTTP_STATUS_CODE.internal_server_error.status,
-					message: error.message || error,
-				})
-			}
-		})
-	}
 	/**
 	 * Get project  infromation when project as a task
 	 * @method
