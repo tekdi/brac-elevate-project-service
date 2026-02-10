@@ -301,7 +301,7 @@ const findEntities = function (
 		}
 	})
 }
-const addEntity = function (requestBody, entityType, userToken) {
+const addEntity = function (requestBody, entityType, userToken, tenantId, orgId) {
 	return new Promise(async (resolve, reject) => {
 		try {
 			const url = `${process.env.ENTITY_BASE_URL}${process.env.ENTITY_MANAGEMENT_SERVICE_BASE_URL}${CONSTANTS.endpoints.ADD_ENTITY}?type=${entityType}`
@@ -310,6 +310,9 @@ const addEntity = function (requestBody, entityType, userToken) {
 					'content-type': 'application/json',
 					'internal-access-token': process.env.INTERNAL_ACCESS_TOKEN,
 					'x-auth-token': userToken,
+					'admin-access-token': process.env.ADMIN_ACCESS_TOKEN,
+					tenantId: tenantId,
+					orgId: orgId,
 				},
 				json: requestBody,
 			}

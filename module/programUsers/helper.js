@@ -628,14 +628,16 @@ module.exports = class ProgramUsersHelper {
 									name: user.name,
 								},
 								entityType,
-								userDetails.userToken
+								userDetails.userToken,
+								tenantId,
+								orgId
 							)
 
 							if (entityResult.success && userId !== parseInt(managerUserId)) {
 								assignedUsersWithEntities.push({
-									userId: entityResult.data.metaInformation.externalId,
-									name: entityResult.data.metaInformation.name,
-									entityId: entityResult.data._id,
+									userId: entityResult.data[0].metaInformation.externalId,
+									name: entityResult.data[0].metaInformation.name,
+									entityId: entityResult.data[0]._id,
 									status: assignedUsersStatus,
 								})
 							} else {
