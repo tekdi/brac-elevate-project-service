@@ -245,10 +245,15 @@ let enviromentVariables = {
 		optional: true,
 		default: 'internal_access_token',
 	},
-	PROGRAM_USERS_ENTITIES: {
-		message: 'The program users entities type',
+	PUSH_SUBMISION_STATUS_TO_TASK: {
+		message: 'If task is of observation type, along with submissions push the status to task',
 		optional: true,
-		default: 'users',
+		default: 'false',
+	},
+	ENABLE_PROGRAM_USER_MAPPING: {
+		message: 'If yes, then program user mapping will be updated',
+		optional: true,
+		default: 'false',
 	},
 }
 
