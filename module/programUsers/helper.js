@@ -5,8 +5,6 @@
  * Description : Programs users related helper functionality.
  */
 
-const { resolveLevel } = require('bunyan')
-
 // Dependencies
 const programUsersQueries = require(DB_QUERY_BASE_PATH + '/programUsers')
 const programUsersService = require(SERVICES_BASE_PATH + '/programUsers')
@@ -193,7 +191,11 @@ module.exports = class ProgramUsersHelper {
 	 * @param {String} programExternalId - program external id
 	 * @param {Number} page - page number
 	 * @param {Number} limit - items per page
+	 * @param {String} status - status filter
 	 * @param {String} search - search query
+	 * @param {String} entityId - entity id
+	 * @param {Object} userDetails - user details
+	 * @param {Object} meta - meta information for filtering
 	 * @returns {Object} result
 	 */
 	static async getEntitiesWithPagination(
@@ -205,7 +207,8 @@ module.exports = class ProgramUsersHelper {
 		status,
 		search = '',
 		entityId,
-		userDetails
+		userDetails,
+		meta = {}
 	) {
 		try {
 			// Call service
@@ -218,7 +221,8 @@ module.exports = class ProgramUsersHelper {
 				status,
 				search,
 				entityId,
-				userDetails
+				userDetails,
+				meta
 			)
 
 			return {
@@ -340,14 +344,6 @@ module.exports = class ProgramUsersHelper {
 		}
 	}
 
-	/**
-	 * Check if program exists by programId or programExternalId
-	 * @method
-	 * @name checkProgramExists
-	 * @param {String} programId - program ID
-	 * @param {String} programExternalId - program external ID
-	 * @returns {Boolean} true if program exists, false otherwise
-	 */
 	/**
 	 * Update specific entity fields within a program user
 	 * @method

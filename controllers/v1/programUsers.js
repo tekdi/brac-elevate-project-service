@@ -76,6 +76,7 @@ module.exports = class ProgramUsers extends Abstract {
 			try {
 				let { userId, programId, programExternalId, status, search = '', entityId = '' } = req.query
 				const { pageNo = 1, pageSize = 20 } = req
+				const meta = req.body && req.body.meta ? req.body.meta : {}
 
 				if (
 					!userId &&
@@ -102,7 +103,8 @@ module.exports = class ProgramUsers extends Abstract {
 					status,
 					search,
 					entityId,
-					req.userDetails
+					req.userDetails,
+					meta
 				)
 				return resolve(result)
 			} catch (error) {
@@ -134,6 +136,7 @@ module.exports = class ProgramUsers extends Abstract {
 					userIds = [],
 				} = req.query
 				const { pageNo = 1, pageSize = 20 } = req
+				const meta = req.body && req.body.meta ? req.body.meta : {}
 
 				if (!programId && !programExternalId) {
 					return reject({
@@ -151,7 +154,8 @@ module.exports = class ProgramUsers extends Abstract {
 						parseInt(pageSize),
 						search,
 						type,
-						req.userDetails
+						req.userDetails,
+						meta
 					)
 					return resolve(result)
 				}
@@ -165,7 +169,8 @@ module.exports = class ProgramUsers extends Abstract {
 					parseInt(pageSize),
 					status,
 					search,
-					req.userDetails
+					req.userDetails,
+					meta
 				)
 				return resolve(result)
 			} catch (error) {

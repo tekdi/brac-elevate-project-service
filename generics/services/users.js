@@ -567,6 +567,11 @@ const getUserProfileByIdentifier = function (tenantId, userId = null, username) 
  * @param {Array} userIds - array of userIds
  * @param {String} tenantId - tenantId details
  * @param {String} type - user-service url param
+ * @param {Array} excludeUserIds - array of user IDs to exclude
+ * @param {String} search - search text
+ * @param {Number} page - page number
+ * @param {Number} limit - items per page
+ * @param {Object} meta - meta information for filtering
  * @returns {Promise} A promise that resolves with the user details or rejects with an error.
  */
 
@@ -577,11 +582,12 @@ const accountSearch = function (
 	excludeUserIds = [],
 	search,
 	page = 1,
-	limit = 20
+	limit = 20,
+	meta = {}
 ) {
 	return new Promise(async (resolve, reject) => {
 		try {
-			const params = `?tenant_code=${tenantId}&type=${type}&page=${page}&limit=${limit}`
+			let params = `?tenant_code=${tenantId}&type=${type}&page=${page}&limit=${limit}`
 			if (search) {
 				params += `&search=${search}`
 			}
@@ -599,6 +605,10 @@ const accountSearch = function (
 			}
 			if (excludeUserIds.length > 0) {
 				body.excluded_user_ids = excludeUserIds
+			}
+			// Always include meta if provided, even if empty object
+			if (meta && typeof meta === 'object' && !Array.isArray(meta)) {
+				body.meta = meta
 			}
 
 			request.post({ url, headers, body, json: true }, callBack)

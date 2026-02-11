@@ -123,8 +123,11 @@ module.exports = class ProgramUsersService {
 	 * @param {String} programExternalId - program external ID (optional)
 	 * @param {Number} page - page number
 	 * @param {Number} limit - items per page
+	 * @param {String} status - status filter
 	 * @param {String} searchQuery - search text
 	 * @param {String} entityId - specific entity ID to fetch (optional)
+	 * @param {Object} userDetails - user details
+	 * @param {Object} meta - meta information for filtering
 	 * @returns {Object} entities with pagination info
 	 */
 	static async getEntitiesWithPagination(
@@ -136,7 +139,8 @@ module.exports = class ProgramUsersService {
 		status,
 		searchQuery = '',
 		entityId,
-		userDetails
+		userDetails,
+		meta = {}
 	) {
 		try {
 			const skip = (page - 1) * limit
@@ -191,7 +195,16 @@ module.exports = class ProgramUsersService {
 			const userIds = paginatedEntities.map((entity) => entity.userId).filter(Boolean)
 			// Fetch user details from user service
 			const { success, data } =
-				(await userService.accountSearch(userIds, userDetails.userInformation.tenantId)) || {}
+				(await userService.accountSearch(
+					userIds,
+					userDetails.userInformation.tenantId,
+					'all',
+					[],
+					searchQuery,
+					page,
+					limit,
+					meta
+				)) || {}
 
 			// Throw error if no valid users returned from service
 			if (!success || !data || data.count === 0) {
@@ -229,25 +242,28 @@ module.exports = class ProgramUsersService {
 	/**
 	 * Get program user entities with pagination
 	 * @method
-	 * @name getEntitiesWithPagination
-	 * @param {String} userId - user ID
+	 * @name searhProgramUsers
 	 * @param {String} programId - program ID (optional)
 	 * @param {String} programExternalId - program external ID (optional)
+	 * @param {Array} userIds - array of user IDs
 	 * @param {Number} page - page number
 	 * @param {Number} limit - items per page
+	 * @param {String} status - status filter
 	 * @param {String} searchQuery - search text
-	 * @param {String} entityId - specific entity ID to fetch (optional)
+	 * @param {Object} userDetails - user details
+	 * @param {Object} meta - meta information for filtering
 	 * @returns {Object} entities with pagination info
 	 */
 	static async searhProgramUsers(
 		programId,
 		programExternalId,
+		userIds = [],
 		page = 1,
 		limit = 20,
 		status,
 		searchQuery = '',
-		entityId,
-		userDetails
+		userDetails,
+		meta = {}
 	) {
 		try {
 			const skip = (page - 1) * limit
@@ -302,7 +318,16 @@ module.exports = class ProgramUsersService {
 			const userIds = paginatedEntities.map((entity) => entity.userId).filter(Boolean)
 			// Fetch user details from user service
 			const { success, data } =
-				(await userService.accountSearch(userIds, userDetails.userInformation.tenantId)) || {}
+				(await userService.accountSearch(
+					userIds,
+					userDetails.userInformation.tenantId,
+					'all',
+					[],
+					searchQuery,
+					page,
+					limit,
+					meta
+				)) || {}
 
 			// Throw error if no valid users returned from service
 			if (!success || !data || data.count === 0) {
@@ -348,6 +373,7 @@ module.exports = class ProgramUsersService {
 	 * @param {Number} limit - items per page
 	 * @param {String} searchQuery - search text
 	 * @param {Object} userDetails - user details
+	 * @param {Object} meta - meta information for filtering
 	 * @returns {Object} unmapped users with pagination info
 	 */
 	static async getUnmappedUsers(
@@ -357,7 +383,8 @@ module.exports = class ProgramUsersService {
 		limit = 20,
 		search = '',
 		type = 'all',
-		userDetails
+		userDetails,
+		meta = {}
 	) {
 		try {
 			// Step 1: Find all programUsers for this program
@@ -397,7 +424,8 @@ module.exports = class ProgramUsersService {
 					mappedUserIds,
 					search,
 					page,
-					limit
+					limit,
+					meta
 				)) || {}
 
 			if (!success || !data || data.count === 0) {
