@@ -134,6 +134,7 @@ module.exports = class UserProjectsHelper {
 					[
 						'_id',
 						'tasks',
+						'taskSequence',
 						'programInformation._id',
 						'solutionInformation._id',
 						'solutionInformation.externalId',
@@ -377,35 +378,183 @@ module.exports = class UserProjectsHelper {
 
 					updateProject.tasks = await _projectTask(data.tasks, false, '', '', data.programId, userDetails)
 
+					// Add metaInformation for custom tasks right after _projectTask processing
+					updateProject.tasks.forEach((task) => {
+						if (task.isACustomTask === true || task.isACustomTask === 'true') {
+							if (!task.metaInformation) {
+								task.metaInformation = {}
+							}
+							// Use buttonLabel from request if present, else default to "Upload"
+							task.metaInformation.buttonLabel = task.metaInformation.buttonLabel || 'Upload'
+							// Use icon from request if present, else default to "Upload"
+							task.metaInformation.icon = task.metaInformation.icon || 'Upload'
+						}
+					})
+
 					if (userProject[0].tasks && userProject[0].tasks.length > 0) {
+						// Helper function to recursively find a task by _id in nested structure
+						// This searches in both existing tasks and newly processed tasks
+						const findTaskById = (tasks, taskId) => {
+							for (let i = 0; i < tasks.length; i++) {
+								// Compare as strings to handle ObjectId vs string
+								if (String(tasks[i]._id) === String(taskId)) {
+									return tasks[i]
+								}
+								// Recursively search in children
+								if (tasks[i].children && tasks[i].children.length > 0) {
+									const found = findTaskById(tasks[i].children, taskId)
+									if (found) {
+										return found
+									}
+								}
+							}
+							return null
+						}
+
+						// Helper function to add child to parent's children array and update taskSequence
+						const addChildToParent = (parentTask, childTask) => {
+							// Initialize children array if it doesn't exist
+							if (!parentTask.children) {
+								parentTask.children = []
+							}
+
+							// Check if child already exists in parent's children
+							const childIndex = parentTask.children.findIndex(
+								(child) => String(child._id) === String(childTask._id)
+							)
+
+							if (childIndex < 0) {
+								// Add child to parent's children array
+								parentTask.children.push(childTask)
+
+								// Initialize taskSequence if it doesn't exist
+								if (!parentTask.taskSequence) {
+									parentTask.taskSequence = []
+								}
+
+								// Add child's externalId to parent's taskSequence if not already present
+								if (childTask.externalId && !parentTask.taskSequence.includes(childTask.externalId)) {
+									parentTask.taskSequence.push(childTask.externalId)
+								}
+								return true
+							} else {
+								// Child already exists, update it
+								parentTask.children[childIndex] = childTask
+								// Ensure externalId is in taskSequence
+								if (!parentTask.taskSequence) {
+									parentTask.taskSequence = []
+								}
+								if (childTask.externalId && !parentTask.taskSequence.includes(childTask.externalId)) {
+									parentTask.taskSequence.push(childTask.externalId)
+								}
+								return true
+							}
+						}
+
+						// Process tasks in two passes:
+						// Pass 1: Merge all tasks first (so we can find parents that are also being updated)
+						// Pass 2: Handle parent-child relationships
+
+						// Helper function to recursively find and update a task by _id at any nesting level
+						const findAndUpdateTaskRecursively = (tasks, taskToUpdate) => {
+							for (let i = 0; i < tasks.length; i++) {
+								// Compare as strings to handle ObjectId vs string
+								if (String(tasks[i]._id) === String(taskToUpdate._id)) {
+									// Found the task - update it
+									let keepFieldsFromTask = ['observationInformation', 'submissions']
+
+									removeFieldsFromRequest.forEach((removeField) => {
+										delete tasks[i][removeField]
+									})
+
+									keepFieldsFromTask.forEach((field) => {
+										if (tasks[i][field]) {
+											taskToUpdate[field] = tasks[i][field]
+										}
+									})
+
+									// Merge existing task data with updates
+									tasks[i] = {
+										...tasks[i],
+										...taskToUpdate,
+										updatedBy: userId,
+										updatedAt: new Date(),
+									}
+									return true
+								}
+								// Recursively search in children
+								if (tasks[i].children && tasks[i].children.length > 0) {
+									if (findAndUpdateTaskRecursively(tasks[i].children, taskToUpdate)) {
+										return true
+									}
+								}
+							}
+							return false
+						}
+
+						// First pass: Merge tasks into userProject[0].tasks (recursively find and update existing tasks)
 						updateProject.tasks.forEach((task) => {
 							task.updatedBy = userId
 							task.updatedAt = new Date()
 
-							let taskIndex = userProject[0].tasks.findIndex(
-								(projectTask) => projectTask._id === task._id
-							)
+							// Normalize parentId (handle space before parentId if present)
+							if (task[' parentId']) {
+								task.parentId = task[' parentId']
+								delete task[' parentId']
+							}
 
-							if (taskIndex < 0) {
+							// Try to find and update the task recursively (at any nesting level)
+							const taskFound = findAndUpdateTaskRecursively(userProject[0].tasks, task)
+
+							if (!taskFound) {
+								// Task not found - it's a new task, treat as custom task
+								// Mark as custom task if not already set
+								if (task.isACustomTask !== true && task.isACustomTask !== 'true') {
+									task.isACustomTask = true
+								}
+
+								// Add metaInformation for all new custom tasks
+								if (!task.metaInformation) {
+									task.metaInformation = {}
+								}
+								// Use buttonLabel from request if present, else default to "Upload"
+								task.metaInformation.buttonLabel = task.metaInformation.buttonLabel || 'Upload'
+								// Use icon from request if present, else default to "Upload"
+								task.metaInformation.icon = task.metaInformation.icon || 'Upload'
+
 								userProject[0].tasks.push(task)
+							}
+						})
+
+						// Second pass: Handle parent-child relationships and update root taskSequence
+						// Now that all tasks are merged, we can find parents at any level
+
+						// Initialize root taskSequence if it doesn't exist
+						if (!userProject[0].taskSequence) {
+							userProject[0].taskSequence = []
+						}
+
+						updateProject.tasks.forEach((task) => {
+							if (task.parentId) {
+								// Find parent task recursively in the merged structure
+								// This will find parents at any nesting level (root, child, grandchild, etc.)
+								const parentTask = findTaskById(userProject[0].tasks, task.parentId)
+
+								if (parentTask) {
+									// Add child to parent's children array and update taskSequence
+									addChildToParent(parentTask, task)
+								}
 							} else {
-								let keepFieldsFromTask = ['observationInformation', 'submissions']
-
-								removeFieldsFromRequest.forEach((removeField) => {
-									delete userProject[0].tasks[taskIndex][removeField]
-								})
-
-								keepFieldsFromTask.forEach((field) => {
-									if (userProject[0].tasks[taskIndex][field]) {
-										task[field] = userProject[0].tasks[taskIndex][field]
-									}
-								})
-
-								userProject[0].tasks[taskIndex] = task
+								// Root-level task (no parentId) - add to project's root taskSequence
+								if (task.externalId && !userProject[0].taskSequence.includes(task.externalId)) {
+									userProject[0].taskSequence.push(task.externalId)
+								}
 							}
 						})
 
 						updateProject.tasks = userProject[0].tasks
+						// Update root taskSequence in updateProject
+						updateProject.taskSequence = userProject[0].taskSequence
 					}
 
 					taskReport.total = updateProject.tasks.length
