@@ -128,6 +128,8 @@ module.exports = class ProgramUsersService {
 	 * @param {String} entityId - specific entity ID to fetch (optional)
 	 * @param {Object} userDetails - user details
 	 * @param {Object} meta - meta information for filtering
+	 * @param {String} sortBy - field to sort by
+	 * @param {String} sortOrder - sort order (asc/desc)
 	 * @returns {Object} entities with pagination info
 	 */
 	static async getEntitiesWithPagination(
@@ -140,7 +142,9 @@ module.exports = class ProgramUsersService {
 		searchQuery = '',
 		entityId,
 		userDetails,
-		meta = {}
+		meta = {},
+		sortBy = 'name',
+		sortOrder = 'desc'
 	) {
 		try {
 			const skip = (page - 1) * limit
@@ -203,7 +207,9 @@ module.exports = class ProgramUsersService {
 					searchQuery,
 					page,
 					limit,
-					meta
+					meta,
+					sortBy,
+					sortOrder
 				)) || {}
 
 			// Throw error if no valid users returned from service
@@ -252,6 +258,8 @@ module.exports = class ProgramUsersService {
 	 * @param {String} searchQuery - search text
 	 * @param {Object} userDetails - user details
 	 * @param {Object} meta - meta information for filtering
+	 * @param {String} sortBy - field to sort by
+	 * @param {String} sortOrder - sort order (asc/desc)
 	 * @returns {Object} entities with pagination info
 	 */
 	static async searhProgramUsers(
@@ -263,7 +271,9 @@ module.exports = class ProgramUsersService {
 		status,
 		searchQuery = '',
 		userDetails,
-		meta = {}
+		meta = {},
+		sortBy = 'name',
+		sortOrder = 'desc'
 	) {
 		try {
 			const skip = (page - 1) * limit
@@ -326,7 +336,9 @@ module.exports = class ProgramUsersService {
 					searchQuery,
 					page,
 					limit,
-					meta
+					meta,
+					sortBy,
+					sortOrder
 				)) || {}
 
 			// Throw error if no valid users returned from service
@@ -374,6 +386,8 @@ module.exports = class ProgramUsersService {
 	 * @param {String} searchQuery - search text
 	 * @param {Object} userDetails - user details
 	 * @param {Object} meta - meta information for filtering
+	 * @param {String} sortBy - field to sort by
+	 * @param {String} sortOrder - sort order (asc/desc)
 	 * @returns {Object} unmapped users with pagination info
 	 */
 	static async getUnmappedUsers(
@@ -384,7 +398,9 @@ module.exports = class ProgramUsersService {
 		search = '',
 		type = 'all',
 		userDetails,
-		meta = {}
+		meta = {},
+		sortBy = 'name',
+		sortOrder = 'desc'
 	) {
 		try {
 			// Step 1: Find all programUsers for this program
@@ -425,7 +441,9 @@ module.exports = class ProgramUsersService {
 					search,
 					page,
 					limit,
-					meta
+					meta,
+					sortBy,
+					sortOrder
 				)) || {}
 
 			if (!success || !data || data.count === 0) {

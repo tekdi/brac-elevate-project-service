@@ -74,9 +74,26 @@ module.exports = class ProgramUsers extends Abstract {
 	async entities(req) {
 		return new Promise(async (resolve, reject) => {
 			try {
-				let { userId, programId, programExternalId, status, search = '', entityId = '' } = req.query
+				let {
+					userId,
+					programId,
+					programExternalId,
+					status,
+					search = '',
+					entityId = '',
+					sortBy,
+					sortOrder,
+				} = req.query
 				const { pageNo = 1, pageSize = 20 } = req
 				const meta = req.body && req.body.meta ? req.body.meta : {}
+
+				// Set default sorting: updatedAt desc
+				if (!sortBy) {
+					sortBy = 'name'
+				}
+				if (!sortOrder || (sortOrder !== 'asc' && sortOrder !== 'desc')) {
+					sortOrder = 'desc'
+				}
 
 				if (
 					!userId &&
@@ -104,7 +121,9 @@ module.exports = class ProgramUsers extends Abstract {
 					search,
 					entityId,
 					req.userDetails,
-					meta
+					meta,
+					sortBy,
+					sortOrder
 				)
 				return resolve(result)
 			} catch (error) {
@@ -134,9 +153,19 @@ module.exports = class ProgramUsers extends Abstract {
 					search = '',
 					excludeMapped = false,
 					userIds = [],
+					sortBy,
+					sortOrder,
 				} = req.query
 				const { pageNo = 1, pageSize = 20 } = req
 				const meta = req.body && req.body.meta ? req.body.meta : {}
+
+				// Set default sorting: updatedAt desc
+				if (!sortBy) {
+					sortBy = 'name'
+				}
+				if (!sortOrder || (sortOrder !== 'asc' && sortOrder !== 'desc')) {
+					sortOrder = 'desc'
+				}
 
 				if (!programId && !programExternalId) {
 					return reject({
@@ -155,7 +184,9 @@ module.exports = class ProgramUsers extends Abstract {
 						search,
 						type,
 						req.userDetails,
-						meta
+						meta,
+						sortBy,
+						sortOrder
 					)
 					return resolve(result)
 				}
@@ -170,7 +201,9 @@ module.exports = class ProgramUsers extends Abstract {
 					status,
 					search,
 					req.userDetails,
-					meta
+					meta,
+					sortBy,
+					sortOrder
 				)
 				return resolve(result)
 			} catch (error) {

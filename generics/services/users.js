@@ -583,13 +583,21 @@ const accountSearch = function (
 	search,
 	page = 1,
 	limit = 20,
-	meta = {}
+	meta = {},
+	sortBy = 'name',
+	sortOrder = 'desc'
 ) {
 	return new Promise(async (resolve, reject) => {
 		try {
 			let params = `?tenant_code=${tenantId}&type=${type}&page=${page}&limit=${limit}`
 			if (search) {
 				params += `&search=${search}`
+			}
+			if (sortBy) {
+				params += `&sortBy=${sortBy}`
+			}
+			if (sortOrder) {
+				params += `&sortOrder=${sortOrder}`
 			}
 
 			let url = `${interfaceServiceUrl}${process.env.USER_SERVICE_BASE_URL}${CONSTANTS.endpoints.ACCOUNT_SEARCH}${params}`
