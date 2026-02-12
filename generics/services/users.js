@@ -585,7 +585,7 @@ const accountSearch = function (
 	limit = 20,
 	meta = {},
 	sortBy = 'name',
-	sortOrder = 'desc'
+	sortOrder = 'asc'
 ) {
 	return new Promise(async (resolve, reject) => {
 		try {

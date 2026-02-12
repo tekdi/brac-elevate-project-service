@@ -87,12 +87,12 @@ module.exports = class ProgramUsers extends Abstract {
 				const { pageNo = 1, pageSize = 20 } = req
 				const meta = req.body && req.body.meta ? req.body.meta : {}
 
-				// Set default sorting: updatedAt desc
+				// Set default sorting: name asc
 				if (!sortBy) {
 					sortBy = 'name'
 				}
 				if (!sortOrder || (sortOrder !== 'asc' && sortOrder !== 'desc')) {
-					sortOrder = 'desc'
+					sortOrder = 'asc'
 				}
 
 				if (
@@ -159,12 +159,12 @@ module.exports = class ProgramUsers extends Abstract {
 				const { pageNo = 1, pageSize = 20 } = req
 				const meta = req.body && req.body.meta ? req.body.meta : {}
 
-				// Set default sorting: updatedAt desc
+				// Set default sorting: name asc
 				if (!sortBy) {
 					sortBy = 'name'
 				}
 				if (!sortOrder || (sortOrder !== 'asc' && sortOrder !== 'desc')) {
-					sortOrder = 'desc'
+					sortOrder = 'asc'
 				}
 
 				if (!programId && !programExternalId) {

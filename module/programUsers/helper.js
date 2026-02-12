@@ -212,7 +212,7 @@ module.exports = class ProgramUsersHelper {
 		userDetails,
 		meta = {},
 		sortBy = 'name',
-		sortOrder = 'desc'
+		sortOrder = 'asc'
 	) {
 		try {
 			// Call service

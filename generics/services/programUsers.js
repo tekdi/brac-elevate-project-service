@@ -144,7 +144,7 @@ module.exports = class ProgramUsersService {
 		userDetails,
 		meta = {},
 		sortBy = 'name',
-		sortOrder = 'desc'
+		sortOrder = 'asc'
 	) {
 		try {
 			const skip = (page - 1) * limit
@@ -273,7 +273,7 @@ module.exports = class ProgramUsersService {
 		userDetails,
 		meta = {},
 		sortBy = 'name',
-		sortOrder = 'desc'
+		sortOrder = 'asc'
 	) {
 		try {
 			const skip = (page - 1) * limit
@@ -400,7 +400,7 @@ module.exports = class ProgramUsersService {
 		userDetails,
 		meta = {},
 		sortBy = 'name',
-		sortOrder = 'desc'
+		sortOrder = 'asc'
 	) {
 		try {
 			// Step 1: Find all programUsers for this program
