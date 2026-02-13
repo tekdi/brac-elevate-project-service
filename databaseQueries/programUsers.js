@@ -204,41 +204,6 @@ module.exports = class programUsers {
 	}
 
 	/**
-	 * Update entity in entities array
-	 * @method
-	 * @name updateEntity
-	 * @param {String} docId - document _id
-	 * @param {String} entityUserId - entity user id
-	 * @param {Object} updateData - data to update in entity
-	 * @returns {Object} updated document
-	 */
-	static updateEntity(docId, entityUserId, updateData) {
-		return new Promise(async (resolve, reject) => {
-			try {
-				const updateObj = {}
-				Object.keys(updateData).forEach((key) => {
-					updateObj[`entities.$.${key}`] = updateData[key]
-				})
-
-				let result = await database.models.programUsers.findOneAndUpdate(
-					{ _id: docId, 'entities.userId': entityUserId },
-					{
-						$set: {
-							...updateObj,
-							updatedAt: new Date(),
-						},
-					},
-					{ new: true, lean: true }
-				)
-
-				return resolve(result)
-			} catch (error) {
-				return reject(error)
-			}
-		})
-	}
-
-	/**
 	 * Update overview statistics
 	 * @method
 	 * @name updateOverview
