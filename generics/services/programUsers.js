@@ -8,6 +8,7 @@ const { result } = require('lodash')
 
 const programUsersQueries = require(DB_QUERY_BASE_PATH + '/programUsers')
 const userService = require(GENERICS_FILES_PATH + '/services/users')
+const userProjectsHelper = require(MODULES_BASE_PATH + '/userProjects/helper')
 
 module.exports = class ProgramUsersService {
 	/**
@@ -218,13 +219,26 @@ module.exports = class ProgramUsersService {
 			}
 
 			// Map accountSearch data with entity data from docData and filter by searchQuery
-			const filteredData = paginatedEntities.map((entity) => {
-				const userData = data.data.find((user) => user.id == entity.userId)
-				return {
-					...entity,
-					userDetails: userData || null,
-				}
-			})
+			// Also calculate progress for entities with idpProjectId
+			const filteredData = await Promise.all(
+				paginatedEntities.map(async (entity) => {
+					const userData = data.data.find((user) => user.id == entity.userId)
+					const result = {
+						...entity,
+						userDetails: userData || null,
+					}
+
+					// Calculate progress only if entity status is IN_PROGRESS and has idpProjectId
+					if (entity.status === 'IN_PROGRESS' && entity.idpProjectId) {
+						const progress = await userProjectsHelper.calculateProjectProgress(entity.idpProjectId)
+						if (progress) {
+							result.progress = progress
+						}
+					}
+
+					return result
+				})
+			)
 
 			return {
 				status: 200,

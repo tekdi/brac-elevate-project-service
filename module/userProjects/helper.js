@@ -5450,6 +5450,89 @@ module.exports = class UserProjectsHelper {
 			result: progressStats,
 		}
 	}
+
+	/**
+	 * Recursively count tasks at all levels, filtering out deleted tasks
+	 * Only excludes tasks where isDeleted === true
+	 * isDeletable: false means mandatory task, should still be counted
+	 * @method
+	 * @name countTasksRecursively
+	 * @param {Object} task - task object (can have nested children)
+	 * @param {Object} counters - object with totalTasks and completedTasks
+	 * @returns {void}
+	 */
+	static countTasksRecursively(task, counters) {
+		// Only exclude tasks that are deleted (isDeleted === true)
+		// isDeletable: false means mandatory task, should still be counted
+		const shouldCountTask = task.isDeleted !== true
+
+		// If task has children, recursively process them
+		if (task.children && task.children.length > 0) {
+			task.children.forEach((child) => {
+				// Recursively process nested children (handles all levels)
+				this.countTasksRecursively(child, counters)
+			})
+		} else {
+			// This is a leaf task (no children) - count it only if not deleted
+			if (shouldCountTask) {
+				counters.totalTasks++
+				// Check if task status is completed (case-insensitive)
+				if (task.status && task.status.toLowerCase() === 'completed') {
+					counters.completedTasks++
+				}
+			}
+		}
+	}
+
+	/**
+	 * Calculate project progress by filtering out deleted tasks
+	 * Checks all levels including nested children/subtasks
+	 * Only counts tasks where isDeleted !== true (isDeletable value doesn't matter)
+	 * @method
+	 * @name calculateProjectProgress
+	 * @param {String} projectId - project ID
+	 * @returns {Object} progress statistics with totalTasks, completedTasks, completionPercentage
+	 */
+	static async calculateProjectProgress(projectId) {
+		try {
+			// Fetch project with all task levels - need to get nested children structure
+			const project = await projectQueries.projectDocument(
+				{ _id: projectId },
+				['tasks', 'status'] // Get all task fields including nested children
+			)
+
+			if (!project || !project.length > 0) {
+				return null
+			}
+
+			const counters = {
+				totalTasks: 0,
+				completedTasks: 0,
+			}
+
+			// Process all tasks recursively to handle all nesting levels
+			if (project[0].tasks && project[0].tasks.length > 0) {
+				project[0].tasks.forEach((task) => {
+					this.countTasksRecursively(task, counters)
+				})
+			}
+
+			// Calculate overall completion percentage
+			const completionPercentage =
+				counters.totalTasks > 0
+					? parseFloat(((counters.completedTasks / counters.totalTasks) * 100).toFixed(2))
+					: 0
+
+			return {
+				totalTasks: counters.totalTasks,
+				completedTasks: counters.completedTasks,
+				completionPercentage,
+			}
+		} catch (error) {
+			console.error('Error calculating project progress:', error)
+			return null
+		}
+	}
 }
 
 /**
