@@ -174,9 +174,18 @@ module.exports = class ProgramUsersService {
 				}
 			}
 
-			// Filter by status if provided
+			// Filter by status if provided (supports comma-separated values)
 			if (status) {
-				filteredEntities = filteredEntities.filter((entity) => entity.status == status)
+				// Parse comma-separated status values into an array
+				const statusArray =
+					typeof status === 'string'
+						? status
+								.split(',')
+								.map((s) => s.trim())
+								.filter((s) => s.length > 0)
+						: [status]
+
+				filteredEntities = filteredEntities.filter((entity) => statusArray.includes(entity.status))
 			}
 
 			// Filter by search query if provided
@@ -297,9 +306,18 @@ module.exports = class ProgramUsersService {
 				}
 			}
 
-			// Filter by status if provided
+			// Filter by status if provided (supports comma-separated values)
 			if (status) {
-				filteredEntities = filteredEntities.filter((entity) => entity.status == status)
+				// Parse comma-separated status values into an array
+				const statusArray =
+					typeof status === 'string'
+						? status
+								.split(',')
+								.map((s) => s.trim())
+								.filter((s) => s.length > 0)
+						: [status]
+
+				filteredEntities = filteredEntities.filter((entity) => statusArray.includes(entity.status))
 			}
 
 			// Filter by search query if provided
