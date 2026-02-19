@@ -1282,7 +1282,6 @@ module.exports = class UserProjectsHelper {
 	static updateProgramUserMapping(projectId) {
 		return new Promise(async (resolve, reject) => {
 			try {
-				let resp
 				const progressStats = await getTaskCompletionStats(projectId)
 
 				const projects = await projectQueries.projectDocument({ _id: projectId }, [
@@ -1302,69 +1301,74 @@ module.exports = class UserProjectsHelper {
 				}
 				const project = projects[0]
 
-				// if (project?.metaInformation?.programUserMappingRef) {
-				// 	const programUserMappingRef = project.metaInformation.programUserMappingRef;
-				// if project is  created by the user, then update the entity in the program user mapping
-				let userId = project.createdBy
-				resp = await programUsersService.programUsersDocument(
-					{ userId: project.createdBy, programId: project.programId },
+				const isSelfCreated = project.userId.toString() === project.createdBy.toString()
+
+				// 2. Determine target Program ID and User ID
+				// If Scenario 2 (IDP), we look up the creator's record via referenceFrom
+				const targetProgramId = isSelfCreated ? project.programId : project.referenceFrom
+				const targetUserId = project.createdBy
+
+				// 3. Fetch Program User Document
+				const [programUser] = await programUsersQueries.programUsersDocument(
+					{
+						userId: targetUserId,
+						programId: targetProgramId,
+					},
 					['_id', 'entities']
 				)
-				if (resp.length > 0) {
-					//if (project.userId != project.createdBy) {
-					const entity = resp[0].entities.find((entity) => entity.entityId === project.entityId)
-					if (entity) {
-						//entity.status = (project.status === CONSTANTS.common.COMPLETED_STATUS) ? "ONBOARDED" : "IN_PROGRESS";
-						if (entity.status === 'IN_PROGRESS' && entity.idpProjectId == project._id) {
-							statusUpdate = {
-								idpProgress: progressStats,
-								status: 'IN_PROGRESS',
-							}
-							if (progressStats.projectStatus === 'completed') {
-								statusUpdate.status = 'COMPLETED'
-							}
 
-							await programUsersService.updateEntity(
-								resp[0]._id,
-								'',
-								'',
-								'',
-								project.entityId,
-								statusUpdate
-							)
-
-							if (project.userId != project.createdBy) {
-								//userId = project.createdBy;
-								//updateSpecificEntity = true;
-
-								const resp1 = await programUsersService.createOrUpdate(
-									{ userId: project.userId, programId: project.programId },
-									{ metaInformation: { idpProgress: progressStats }, status: statusUpdate.status }
-								)
-							}
-						}
-						if (
-							entity.status === 'NOT_ONBOARDED' &&
-							entity.onBoardedProjectId.toString() === project._id.toString()
-						) {
-							await programUsersService.updateEntity(
-								project.createdBy,
-								project.programId,
-								'',
-								project.entityId,
-								{
-									onBoardingProgress: progressStats,
-								},
-								project.tenantId
-							)
-						}
-					}
-					return resolve({
-						success: true,
-						message: 'Program user mapping handled successfully',
-					})
+				if (!programUser) {
+					return { success: true, message: 'No program user mapping found' }
 				}
+
+				const entity = programUser.entities.find((e) => e.entityId === project.entityId)
+				if (!entity) {
+					return { success: true, message: 'Entity not found in program' }
+				}
+
+				const projectStringId = project._id.toString()
+				let updatePayload = null
+
+				// 4. Unified Logic for Progress Updates
+				if (entity.status === 'NOT_ONBOARDED' && entity.onBoardedProjectId?.toString() === projectStringId) {
+					updatePayload = { onBoardingProgress: progressStats }
+				} else if (entity.status === 'IN_PROGRESS' && entity.idpProjectId?.toString() === projectStringId) {
+					updatePayload = {
+						idpProgress: progressStats,
+						status: progressStats.projectStatus === 'completed' ? 'COMPLETED' : 'IN_PROGRESS',
+					}
+				}
+
+				// 5. Execute Updates
+				if (updatePayload) {
+					await programUsersService.updateEntity(
+						targetUserId,
+						targetProgramId,
+						isSelfCreated ? project.programExternalId || '' : '',
+						project.entityId,
+						updatePayload,
+						project.tenantId
+					)
+
+					// Additional step for Scenario 2: Sync the assigned user's record
+					if (!isSelfCreated) {
+						await programUsersService.createOrUpdate({
+							userId: project.userId,
+							programId: project.programId,
+							programExternalId: project.programExternalId,
+							tenantId: project.tenantId,
+							metaInformation: { idpProgress: progressStats },
+							status: updatePayload.status,
+						})
+					}
+				}
+
+				return resolve({
+					success: true,
+					message: 'Program user mapping handled successfully',
+				})
 			} catch (error) {
+				console.error('updateProgramUserMapping error:', error)
 				return resolve({
 					success: true,
 					message: 'Program user mapping handled successfully',
