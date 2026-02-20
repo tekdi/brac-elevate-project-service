@@ -659,9 +659,12 @@ const updateProfile = function (userId, updateData, userToken, tenantCode, organ
 			const url = interfaceServiceUrl + process.env.USER_SERVICE_BASE_URL + '/v1/org-admin/updateUser/' + userId
 
 			// Include organization_id in the body (required by org-admin endpoint)
+			// If updateData already contains organization_id (string or array), use it; otherwise use the parameter
+			// organization_id can be: string (e.g., "brac_gbl") or array (e.g., ["brac_gbl", "org2"])
+			// The array format is preserved and sent to the user service
 			const bodyData = {
 				...updateData,
-				organization_id: organizationId,
+				organization_id: updateData.organization_id !== undefined ? updateData.organization_id : organizationId,
 			}
 
 			const options = {
@@ -674,15 +677,9 @@ const updateProfile = function (userId, updateData, userToken, tenantCode, organ
 				json: bodyData,
 			}
 
-			// Use PATCH method for org-admin updateUser endpoint (as per working curl)
-			// request library supports patch method, but if not available, use method option
-			if (request.patch) {
-				request.patch(url, options, updateCallback)
-			} else {
-				// Fallback: use request with method option
-				options.method = 'PATCH'
-				request(url, options, updateCallback)
-			}
+			// Use POST method for org-admin updateUser endpoint
+			options.method = 'POST'
+			request.post(url, options, updateCallback)
 			let result = {
 				success: true,
 			}
