@@ -181,4 +181,53 @@ module.exports = class ProgramUsers extends Abstract {
 			}
 		})
 	}
+
+	/**
+	 * Update entity location/profile information
+	 * Validates that logged-in user has participant assigned before updating
+	 * @method
+	 * @name updateEntityLocation
+	 * @param {Object} req - request object
+	 * @param {String} req.body.userId - participant's userId to update
+	 * @param {String} req.body.entityId - participant's entityId (optional)
+	 * @param {Object} req.body.updateData - profile data to update (province, site, address, etc.)
+	 * @returns {Object} response with status and updated user data
+	 */
+	async updateEntityLocation(req) {
+		return new Promise(async (resolve, reject) => {
+			try {
+				const { userId, entityId, updateData } = req.body
+
+				if (!userId) {
+					return reject({
+						status: HTTP_STATUS_CODE.bad_request.status,
+						message: 'userId is required',
+					})
+				}
+
+				if (!updateData) {
+					return reject({
+						status: HTTP_STATUS_CODE.bad_request.status,
+						message: 'updateData is required',
+					})
+				}
+
+				const result = await programUsersHelper.updateEntityLocation(
+					{
+						userId,
+						entityId,
+						updateData,
+					},
+					req.userDetails
+				)
+
+				return resolve(result)
+			} catch (error) {
+				return reject({
+					status: HTTP_STATUS_CODE.internal_server_error.status,
+					message: error.message || 'Internal server error',
+				})
+			}
+		})
+	}
 }
