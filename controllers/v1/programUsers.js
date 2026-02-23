@@ -91,9 +91,10 @@ module.exports = class ProgramUsers extends Abstract {
 				if (!sortBy) {
 					sortBy = 'name'
 				}
-				if (!sortOrder || (sortOrder !== 'asc' && sortOrder !== 'desc')) {
-					sortOrder = 'asc'
-				}
+				const validSortOrder = ['asc', 'desc']
+				const finalSortOrder = validSortOrder.includes((sortOrder || '').toLowerCase())
+					? sortOrder.toUpperCase()
+					: 'DESC'
 
 				if (
 					!userId &&
@@ -123,7 +124,7 @@ module.exports = class ProgramUsers extends Abstract {
 					req.userDetails,
 					meta,
 					sortBy,
-					sortOrder
+					finalSortOrder
 				)
 				return resolve(result)
 			} catch (error) {
@@ -153,19 +154,18 @@ module.exports = class ProgramUsers extends Abstract {
 					search = '',
 					excludeMapped = false,
 					userIds = [],
-					sortBy,
+					sortBy: querySortBy,
 					sortOrder,
 				} = req.query
 				const { pageNo = 1, pageSize = 20 } = req
 				const meta = req.body && req.body.meta ? req.body.meta : {}
 
 				// Set default sorting: name asc
-				if (!sortBy) {
-					sortBy = 'name'
-				}
-				if (!sortOrder || (sortOrder !== 'asc' && sortOrder !== 'desc')) {
-					sortOrder = 'asc'
-				}
+				const sortBy = querySortBy || 'name'
+				const validSortOrder = ['asc', 'desc']
+				const finalSortOrder = validSortOrder.includes((sortOrder || '').toLowerCase())
+					? sortOrder.toUpperCase()
+					: 'DESC'
 
 				if (!programId && !programExternalId) {
 					return reject({
@@ -186,7 +186,7 @@ module.exports = class ProgramUsers extends Abstract {
 						req.userDetails,
 						meta,
 						sortBy,
-						sortOrder
+						finalSortOrder
 					)
 					return resolve(result)
 				}
@@ -203,7 +203,7 @@ module.exports = class ProgramUsers extends Abstract {
 					req.userDetails,
 					meta,
 					sortBy,
-					sortOrder
+					finalSortOrder
 				)
 				return resolve(result)
 			} catch (error) {
