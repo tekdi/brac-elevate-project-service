@@ -74,9 +74,27 @@ module.exports = class ProgramUsers extends Abstract {
 	async entities(req) {
 		return new Promise(async (resolve, reject) => {
 			try {
-				let { userId, programId, programExternalId, status, search = '', entityId = '' } = req.query
+				let {
+					userId,
+					programId,
+					programExternalId,
+					status,
+					search = '',
+					entityId = '',
+					sortBy,
+					sortOrder,
+				} = req.query
 				const { pageNo = 1, pageSize = 20 } = req
 				const meta = req.body && req.body.meta ? req.body.meta : {}
+
+				// Set default sorting: name asc
+				if (!sortBy) {
+					sortBy = 'name'
+				}
+				const validSortOrder = ['asc', 'desc']
+				const finalSortOrder = validSortOrder.includes((sortOrder || '').toLowerCase())
+					? sortOrder.toUpperCase()
+					: 'DESC'
 
 				if (
 					!userId &&
@@ -104,7 +122,9 @@ module.exports = class ProgramUsers extends Abstract {
 					search,
 					entityId,
 					req.userDetails,
-					meta
+					meta,
+					sortBy,
+					finalSortOrder
 				)
 				return resolve(result)
 			} catch (error) {
@@ -134,9 +154,18 @@ module.exports = class ProgramUsers extends Abstract {
 					search = '',
 					excludeMapped = false,
 					userIds = [],
+					sortBy: querySortBy,
+					sortOrder,
 				} = req.query
 				const { pageNo = 1, pageSize = 20 } = req
 				const meta = req.body && req.body.meta ? req.body.meta : {}
+
+				// Set default sorting: name asc
+				const sortBy = querySortBy || 'name'
+				const validSortOrder = ['asc', 'desc']
+				const finalSortOrder = validSortOrder.includes((sortOrder || '').toLowerCase())
+					? sortOrder.toUpperCase()
+					: 'DESC'
 
 				if (!programId && !programExternalId) {
 					return reject({
@@ -155,7 +184,9 @@ module.exports = class ProgramUsers extends Abstract {
 						search,
 						type,
 						req.userDetails,
-						meta
+						meta,
+						sortBy,
+						finalSortOrder
 					)
 					return resolve(result)
 				}
@@ -170,7 +201,9 @@ module.exports = class ProgramUsers extends Abstract {
 					status,
 					search,
 					req.userDetails,
-					meta
+					meta,
+					sortBy,
+					finalSortOrder
 				)
 				return resolve(result)
 			} catch (error) {
