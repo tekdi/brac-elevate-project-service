@@ -720,4 +720,172 @@ module.exports = class ProgramUsersHelper {
 			}
 		}
 	}
+
+	/**
+	 * Check if logged-in user has the participant assigned in programUsers
+	 * @method
+	 * @name checkParticipantAssigned
+	 * @param {String} loggedInUserId - logged in user's userId
+	 * @param {String} participantUserId - participant's userId to check
+	 * @param {String} participantEntityId - participant's entityId to check
+	 * @param {String} tenantId - tenant ID
+	 * @returns {Promise<Object>} result with success status and programUsers document if found
+	 */
+	static async checkParticipantAssigned(loggedInUserId, participantUserId, participantEntityId, tenantId) {
+		try {
+			// Find programUsers document where logged-in user is the userId and has the participant in entities
+			const query = {
+				userId: loggedInUserId.toString(),
+				tenantId: tenantId,
+				entities: {
+					$elemMatch: {
+						$or: [
+							{ userId: participantUserId.toString() },
+							{ userId: participantEntityId.toString() },
+							{ entityId: participantEntityId.toString() },
+							{ externalId: participantEntityId.toString() },
+						],
+					},
+				},
+			}
+
+			const programUserDoc = await programUsersQueries.programUsersDocument(query, [
+				'_id',
+				'userId',
+				'entities',
+				'programId',
+				'programExternalId',
+			])
+
+			if (!programUserDoc || programUserDoc.length === 0) {
+				return {
+					success: false,
+					message: 'Participant not assigned to logged-in user',
+				}
+			}
+
+			// Find the specific entity
+			const doc = programUserDoc[0]
+			const entity = doc.entities?.find(
+				(e) =>
+					e.userId == participantUserId ||
+					e.userId == participantEntityId ||
+					e.entityId == participantEntityId ||
+					e.externalId == participantEntityId
+			)
+
+			if (!entity) {
+				return {
+					success: false,
+					message: 'Participant entity not found in programUsers',
+				}
+			}
+
+			return {
+				success: true,
+				programUserDoc: doc,
+				entity: entity,
+			}
+		} catch (error) {
+			console.error('Error checking participant assignment:', error)
+			return {
+				success: false,
+				message: error.message || 'Error checking participant assignment',
+			}
+		}
+	}
+
+	/**
+	 * Update entity location/profile information
+	 * Similar to user/update but validates that logged-in user has participant assigned
+	 * @method
+	 * @name updateEntityLocation
+	 * @param {Object} data - request body data
+	 * @param {String} data.userId - participant's userId to update
+	 * @param {String} data.entityId - participant's entityId (optional, can use userId)
+	 * @param {Object} data.updateData - profile data to update (province, site, address, etc.)
+	 * @param {Object} userDetails - logged in user details
+	 * @returns {Object} result with status and updated user data
+	 */
+	static async updateEntityLocation(data, userDetails) {
+		try {
+			const { userId, entityId, updateData } = data
+			const loggedInUserId = userDetails.userInformation?.userId
+			const tenantId = userDetails.userInformation?.tenantId
+			const userToken = userDetails.userToken
+
+			// Validate required fields
+			if (!userId) {
+				return {
+					success: false,
+					status: HTTP_STATUS_CODE.bad_request.status,
+					message: 'userId is required',
+				}
+			}
+
+			if (!updateData || typeof updateData !== 'object' || Object.keys(updateData).length === 0) {
+				return {
+					success: false,
+					status: HTTP_STATUS_CODE.bad_request.status,
+					message: 'updateData is required and must be a non-empty object',
+				}
+			}
+
+			// Use entityId if provided, otherwise use userId
+			const participantIdentifier = entityId || userId
+
+			// Check if logged-in user has this participant assigned
+			const assignmentCheck = await this.checkParticipantAssigned(
+				loggedInUserId,
+				userId,
+				participantIdentifier,
+				tenantId
+			)
+
+			if (!assignmentCheck.success) {
+				return {
+					success: false,
+					status: HTTP_STATUS_CODE.forbidden.status,
+					message: assignmentCheck.message || 'You do not have permission to update this participant',
+				}
+			}
+
+			// Get tenant code and organization ID from userDetails
+			const tenantCode =
+				userDetails.userInformation?.tenantCode || userDetails.userInformation?.tenantId || tenantId
+			const organizationId = userDetails.userInformation?.organizationId
+
+			// Call user service to update the participant's profile using org-admin endpoint
+			const updateResult = await userService.updateProfile(
+				userId,
+				updateData,
+				userToken,
+				tenantCode,
+				organizationId
+			)
+
+			if (!updateResult.success) {
+				return {
+					success: false,
+					status: HTTP_STATUS_CODE.bad_request.status,
+					message: updateResult.message || 'Failed to update participant profile',
+					error: updateResult.error,
+				}
+			}
+
+			return {
+				success: true,
+				status: HTTP_STATUS_CODE.ok.status,
+				message: 'Participant profile updated successfully',
+				result: updateResult.data,
+			}
+		} catch (error) {
+			console.error('Error updating participant location:', error)
+			return {
+				success: false,
+				status: HTTP_STATUS_CODE.internal_server_error.status,
+				message: error.message || 'Internal server error',
+			}
+		}
+	}
 }
