@@ -37,6 +37,7 @@ const defaultUserProfileConfig = require('@config/defaultUserProfileDeleteConfig
 const configFilePath = process.env.AUTH_CONFIG_FILE_PATH
 const surveyService = require(SERVICES_BASE_PATH + '/survey')
 const programUsersService = require(SERVICES_BASE_PATH + '/programUsers')
+const programUsersHelper = require(MODULES_BASE_PATH + '/programUsers/helper')
 const ObjectId = global.ObjectId || require('mongoose').Types.ObjectId
 
 /**
@@ -1350,9 +1351,14 @@ module.exports = class UserProjectsHelper {
 						project.tenantId
 					)
 
+					// Update overview count when entity status changes (overview tracks status counts)
+					await programUsersHelper
+						._updateOverviewAsync(programUser._id)
+						.catch((err) => console.error('Overview update error in updateProgramUserMapping:', err))
+
 					// Additional step for Scenario 2: Sync the assigned user's record
 					if (!isSelfCreated) {
-						await programUsersService.createOrUpdate({
+						const assignedUserResult = await programUsersService.createOrUpdate({
 							userId: project.userId,
 							programId: project.programId,
 							programExternalId: project.programExternalId,
@@ -1360,6 +1366,17 @@ module.exports = class UserProjectsHelper {
 							metaInformation: { idpProgress: progressStats },
 							status: updatePayload.status,
 						})
+						// Update overview for assigned user's program document
+						if (assignedUserResult?.result?._id) {
+							await programUsersHelper
+								._updateOverviewAsync(assignedUserResult.result._id)
+								.catch((err) =>
+									console.error(
+										'Overview update error for assigned user in updateProgramUserMapping:',
+										err
+									)
+								)
+						}
 					}
 				}
 
