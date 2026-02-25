@@ -218,7 +218,8 @@ module.exports = class ProgramUsersService {
 					limit,
 					meta,
 					sortBy,
-					sortOrder
+					sortOrder,
+					'ACTIVE'
 				)) || {}
 
 			// Throw error if no valid users returned from service
@@ -356,7 +357,8 @@ module.exports = class ProgramUsersService {
 					limit,
 					meta,
 					sortBy,
-					sortOrder
+					sortOrder,
+					'ACTIVE'
 				)) || {}
 
 			// Throw error if no valid users returned from service
@@ -461,7 +463,8 @@ module.exports = class ProgramUsersService {
 					limit,
 					meta,
 					sortBy,
-					sortOrder
+					sortOrder,
+					'ACTIVE'
 				)) || {}
 
 			if (!success || !data || data.count === 0) {

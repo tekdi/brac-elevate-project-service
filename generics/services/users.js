@@ -585,13 +585,17 @@ const accountSearch = function (
 	limit = 20,
 	meta = {},
 	sortBy = 'name',
-	sortOrder = 'asc'
+	sortOrder = 'asc',
+	status = ''
 ) {
 	return new Promise(async (resolve, reject) => {
 		try {
 			let params = `?tenant_code=${tenantId}&type=${type}&page=${page}&limit=${limit}`
 			if (search) {
 				params += `&search=${search}`
+			}
+			if (status) {
+				params += `&status=${status}`
 			}
 			if (sortBy) {
 				params += `&sortBy=${sortBy}`
