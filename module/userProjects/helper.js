@@ -1293,6 +1293,7 @@ module.exports = class UserProjectsHelper {
 					'createdBy',
 					'entityId',
 					'tenantId',
+					'orgId',
 				])
 				if (!projects.length > 0) {
 					throw {
@@ -1342,41 +1343,39 @@ module.exports = class UserProjectsHelper {
 
 				// 5. Execute Updates
 				if (updatePayload) {
-					await programUsersService.updateEntity(
-						targetUserId,
-						targetProgramId,
-						isSelfCreated ? project.programExternalId || '' : '',
-						project.entityId,
-						updatePayload,
-						project.tenantId
-					)
+					// Build userDetails from project (used when called from Kafka/internal - no req.userDetails)
+					const userDetails = {
+						userInformation: {
+							tenantId: project.tenantId,
+							userId: project.createdBy,
+							organizationId: project.orgId || project.tenantId,
+						},
+					}
 
-					// Update overview count when entity status changes (overview tracks status counts)
-					await programUsersHelper
-						._updateOverviewAsync(programUser._id)
-						.catch((err) => console.error('Overview update error in updateProgramUserMapping:', err))
+					await programUsersHelper.updateEntity(
+						{
+							userId: targetUserId,
+							programId: targetProgramId,
+							programExternalId: isSelfCreated ? project.programExternalId || '' : '',
+							entityId: project.entityId,
+							entityUpdates: updatePayload,
+						},
+						userDetails
+					)
 
 					// Additional step for Scenario 2: Sync the assigned user's record
 					if (!isSelfCreated) {
-						const assignedUserResult = await programUsersService.createOrUpdate({
-							userId: project.userId,
-							programId: project.programId,
-							programExternalId: project.programExternalId,
-							tenantId: project.tenantId,
-							metaInformation: { idpProgress: progressStats },
-							status: updatePayload.status,
-						})
-						// Update overview for assigned user's program document
-						if (assignedUserResult?.result?._id) {
-							await programUsersHelper
-								._updateOverviewAsync(assignedUserResult.result._id)
-								.catch((err) =>
-									console.error(
-										'Overview update error for assigned user in updateProgramUserMapping:',
-										err
-									)
-								)
-						}
+						await programUsersHelper.createOrUpdate(
+							{
+								userId: project.userId,
+								programId: project.programId,
+								programExternalId: project.programExternalId,
+								tenantId: project.tenantId,
+								metaInformation: { idpProgress: progressStats },
+								status: updatePayload.status,
+							},
+							userDetails
+						)
 					}
 				}
 
