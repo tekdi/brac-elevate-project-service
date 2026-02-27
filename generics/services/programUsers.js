@@ -103,6 +103,14 @@ module.exports = class ProgramUsersService {
 				new: true,
 				lean: true,
 			})
+
+			// Update overview asynchronously (non-blocking)
+			if (result && result._id) {
+				setImmediate(async () => {
+					this._updateOverviewAsync(result._id)
+				})
+			}
+
 			delete result.overview // Remove overview from result
 			return {
 				status: result.createdAt === result.updatedAt ? 201 : 200,
@@ -524,9 +532,92 @@ module.exports = class ProgramUsersService {
 				entityUpdates,
 				tenantId
 			)
+
+			// Update overview asynchronously (non-blocking)
+			if (result && result._id) {
+				setImmediate(async () => {
+					this._updateOverviewAsync(result._id)
+				})
+			}
+
 			return result
 		} catch (error) {
 			throw error
+		}
+	}
+
+	/**
+	 * Update overview
+	 * @method
+	 * @name _updateOverviewAsync
+	 * @param {Object} programUsersId - Id of userProgram
+	 * @returns {Object} result with status and data
+	 */
+	static async _updateOverviewAsync(programUsersId) {
+		// Placeholder for asynchronous overview update logic
+		// This could involve recalculating summary statistics or other data
+		console.log(`[ProgramUsers] Updating overview for programUsersId: ${programUsersId}`)
+
+		try {
+			// Fetch program user document
+			const docData = await programUsersQueries.findById(programUsersId)
+			if (!docData) {
+				console.error('Program user document not found for overview update:', programUsersId)
+				return
+			}
+
+			const entities = docData.entities || []
+			// Count entities by status
+			const statusCounts = {
+				notonboarded: 0,
+				onboarded: 0,
+				inprogress: 0,
+				completed: 0,
+				graduated: 0,
+				droppedout: 0,
+				total: entities.length,
+			}
+
+			entities.forEach((entity) => {
+				switch (entity.status) {
+					case 'ONBOARDED':
+						statusCounts.onboarded++
+						break
+					case 'NOT_ONBOARDED':
+						statusCounts.notonboarded++
+						break
+					case 'IN_PROGRESS':
+						statusCounts.inprogress++
+						break
+					case 'COMPLETED':
+						statusCounts.completed++
+						break
+					case 'GRADUATED':
+						statusCounts.graduated++
+						break
+					case 'DROPPED_OUT':
+						statusCounts.droppedout++
+						break
+				}
+			})
+
+			// Update overview with status counts
+			const result = await programUsersQueries
+				.updateOverview(programUsersId, {
+					$set: {
+						'overview.assigned': statusCounts.total,
+						'overview.notonboarded': statusCounts.notonboarded,
+						'overview.onboarded': statusCounts.onboarded,
+						'overview.inprogress': statusCounts.inprogress,
+						'overview.completed': statusCounts.completed,
+						'overview.graduated': statusCounts.graduated,
+						'overview.droppedout': statusCounts.droppedout,
+						'overview.lastModified': new Date(),
+					},
+				})
+				.catch((err) => console.error('Overview update error:', err))
+		} catch (err) {
+			console.error('Error calculating entity counts:', err)
 		}
 	}
 }
