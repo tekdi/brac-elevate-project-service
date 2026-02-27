@@ -731,60 +731,31 @@ module.exports = class ProgramUsersHelper {
 	 * @param {String} tenantId - tenant ID
 	 * @returns {Promise<Object>} result with success status and programUsers document if found
 	 */
-	static async checkParticipantAssigned(loggedInUserId, participantUserId, participantEntityId, tenantId) {
+	static async checkifEntityAssigned(loggedInUserId, entityId, programId, tenantId) {
 		try {
-			// Find programUsers document where logged-in user is the userId and has the participant in entities
-			const query = {
-				userId: loggedInUserId.toString(),
-				tenantId: tenantId,
-				entities: {
-					$elemMatch: {
-						$or: [
-							{ userId: participantUserId.toString() },
-							{ userId: participantEntityId.toString() },
-							{ entityId: participantEntityId.toString() },
-							{ externalId: participantEntityId.toString() },
-						],
-					},
-				},
-			}
+			const myDoc = await programUsersService.findByUserAndProgram(loggedInUserId, programId, null, tenantId)
 
-			const programUserDoc = await programUsersQueries.programUsersDocument(query, [
-				'_id',
-				'userId',
-				'entities',
-				'programId',
-				'programExternalId',
-			])
-
-			if (!programUserDoc || programUserDoc.length === 0) {
+			if (!myDoc) {
 				return {
 					success: false,
-					message: 'Participant not assigned to logged-in user',
+					message: 'User is not assigned to program',
 				}
 			}
-
-			// Find the specific entity
-			const doc = programUserDoc[0]
-			const entity = doc.entities?.find(
-				(e) =>
-					e.userId == participantUserId ||
-					e.userId == participantEntityId ||
-					e.entityId == participantEntityId ||
-					e.externalId == participantEntityId
-			)
-
-			if (!entity) {
+			const myEntities = await programUsersService.getMyEntities(loggedInUserId, programId, tenantId)
+			if (myEntities.length > 0) {
+				const myEntity = myEntities.find((entity) => entity.userId === entityId)
+				if (myEntity) {
+					return {
+						success: true,
+						programUserDoc: myDoc,
+						entity: myEntity,
+					}
+				}
+			} else {
 				return {
 					success: false,
-					message: 'Participant entity not found in programUsers',
+					message: 'Entity is not mapped to the given user in the program',
 				}
-			}
-
-			return {
-				success: true,
-				programUserDoc: doc,
-				entity: entity,
 			}
 		} catch (error) {
 			console.error('Error checking participant assignment:', error)
@@ -799,7 +770,7 @@ module.exports = class ProgramUsersHelper {
 	 * Update entity location/profile information
 	 * Similar to user/update but validates that logged-in user has participant assigned
 	 * @method
-	 * @name updateEntityLocation
+	 * @name updateEntityProfile
 	 * @param {Object} data - request body data
 	 * @param {String} data.userId - participant's userId to update
 	 * @param {String} data.entityId - participant's entityId (optional, can use userId)
@@ -807,19 +778,20 @@ module.exports = class ProgramUsersHelper {
 	 * @param {Object} userDetails - logged in user details
 	 * @returns {Object} result with status and updated user data
 	 */
-	static async updateEntityLocation(data, userDetails) {
+	static async updateEntityProfile(data, userDetails) {
 		try {
-			const { userId, entityId, updateData } = data
+			const { entityId, programId, updateData } = data
 			const loggedInUserId = userDetails.userInformation?.userId
 			const tenantId = userDetails.userInformation?.tenantId
+			const orgId = userDetails.userInformation?.organizationId
 			const userToken = userDetails.userToken
 
 			// Validate required fields
-			if (!userId) {
+			if (!loggedInUserId || !programId || !entityId) {
 				return {
 					success: false,
 					status: HTTP_STATUS_CODE.bad_request.status,
-					message: 'userId is required',
+					message: 'userId and programId and entityId are required',
 				}
 			}
 
@@ -831,16 +803,8 @@ module.exports = class ProgramUsersHelper {
 				}
 			}
 
-			// Use entityId if provided, otherwise use userId
-			const participantIdentifier = entityId || userId
-
 			// Check if logged-in user has this participant assigned
-			const assignmentCheck = await this.checkParticipantAssigned(
-				loggedInUserId,
-				userId,
-				participantIdentifier,
-				tenantId
-			)
+			const assignmentCheck = await this.checkifEntityAssigned(loggedInUserId, entityId, programId, tenantId)
 
 			if (!assignmentCheck.success) {
 				return {
@@ -850,18 +814,15 @@ module.exports = class ProgramUsersHelper {
 				}
 			}
 
-			// Get tenant code and organization ID from userDetails
-			const tenantCode =
-				userDetails.userInformation?.tenantCode || userDetails.userInformation?.tenantId || tenantId
-			const organizationId = userDetails.userInformation?.organizationId
-
+			console.log('assignmentCheck', assignmentCheck)
+			return assignmentCheck
 			// Call user service to update the participant's profile using org-admin endpoint
 			const updateResult = await userService.updateProfile(
-				userId,
+				assignmentCheck.entity.userId,
 				updateData,
 				userToken,
-				tenantCode,
-				organizationId
+				tenantId,
+				orgId
 			)
 
 			if (!updateResult.success) {

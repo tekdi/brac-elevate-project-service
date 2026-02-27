@@ -273,11 +273,11 @@ module.exports = class programUsers {
 	 * @param {String} programExternalId - program external ID (optional)
 	 * @returns {Object} program user document
 	 */
-	static findByUserAndProgram(userId, programId, programExternalId) {
+	static findByUserAndProgram(userId, programId, programExternalId, tenantId) {
 		return new Promise(async (resolve, reject) => {
 			try {
 				// Build query: use programId if available, otherwise programExternalId
-				const query = { userId }
+				const query = { userId, tenantId }
 				if (programId) {
 					query.programId = programId
 				} else if (programExternalId) {
@@ -295,7 +295,7 @@ module.exports = class programUsers {
 	/**
 	 * Find program user by userId and either programId or programExternalId
 	 * @method
-	 * @name findByUserAndProgram
+	 * @name findById
 	 * @param {String} userId - user ID
 	 * @param {String} programId - program ID (optional)
 	 * @param {String} programExternalId - program external ID (optional)
