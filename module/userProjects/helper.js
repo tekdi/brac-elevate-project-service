@@ -6737,8 +6737,10 @@ async function getTaskCompletionStats(projectId) {
 		'tasks._id',
 		'tasks.name',
 		'tasks.status',
+		'tasks.isDeleted',
 		'tasks.children._id',
 		'tasks.children.status',
+		'tasks.children.isDeleted',
 		'status',
 	])
 
@@ -6756,12 +6758,22 @@ async function getTaskCompletionStats(projectId) {
 	project[0].tasks.forEach((task) => {
 		const taskId = String(task._id)
 
+		// ✅ Skip deleted parent task
+		if (task.isDeleted === true) {
+			return
+		}
+
 		if (task.children && task.children.length > 0) {
 			// Parent task with children - track children progress
 			let taskTotalChildren = 0
 			let taskCompletedChildren = 0
 
 			task.children.forEach((child) => {
+				// ✅ Skip deleted child task
+				if (child.isDeleted === true) {
+					return
+				}
+
 				taskTotalChildren++
 				totalTasks++
 
