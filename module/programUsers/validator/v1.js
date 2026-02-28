@@ -140,6 +140,51 @@ module.exports = (req) => {
 			// Validate search if provided
 			req.checkQuery('search').isString().withMessage('search must be a string').optional()
 		},
+
+		updateEntityLocation: function () {
+			// userId is required
+			req.checkBody('userId')
+				.notEmpty()
+				.withMessage('userId is required')
+				.isString()
+				.withMessage('userId must be a string')
+
+			// entityId is optional
+			req.checkBody('entityId').optional().isString().withMessage('entityId must be a string')
+
+			// updateData is required and must be a non-empty object
+			req.checkBody('updateData')
+				.notEmpty()
+				.withMessage('updateData is required')
+				.custom((value) => {
+					if (!value || typeof value !== 'object' || Array.isArray(value)) {
+						throw new Error('updateData must be a non-empty object')
+					}
+					if (Object.keys(value).length === 0) {
+						throw new Error('updateData must be a non-empty object')
+					}
+
+					// Validate organization_id if present - can be string or array of strings
+					if (value.hasOwnProperty('organization_id')) {
+						const orgId = value.organization_id
+						if (Array.isArray(orgId)) {
+							// If it's an array, validate all elements are strings
+							if (orgId.length === 0) {
+								throw new Error('organization_id array cannot be empty')
+							}
+							for (let i = 0; i < orgId.length; i++) {
+								if (typeof orgId[i] !== 'string') {
+									throw new Error(`organization_id[${i}] must be a string`)
+								}
+							}
+						} else if (typeof orgId !== 'string') {
+							throw new Error('organization_id must be a string or an array of strings')
+						}
+					}
+
+					return true
+				})
+		},
 	}
 
 	if (programUsersValidator[req.params.method]) {
