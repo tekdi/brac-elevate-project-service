@@ -158,7 +158,12 @@ module.exports = class ProgramUsersService {
 			const skip = (page - 1) * limit
 
 			// Find document by userId and either programId or programExternalId
-			const docData = await this.findByUserAndProgram(userId, programId, programExternalId)
+			const docData = await this.findByUserAndProgram(
+				userId,
+				programId,
+				programExternalId,
+				userDetails.userInformation.tenantId
+			)
 
 			if (!docData) {
 				return {
@@ -296,7 +301,12 @@ module.exports = class ProgramUsersService {
 			const skip = (page - 1) * limit
 
 			// Find document by userId and either programId or programExternalId
-			const docData = await this.findByUserAndProgram(userId, programId, programExternalId)
+			const docData = await this.findByUserAndProgram(
+				userId,
+				programId,
+				programExternalId,
+				userDetails.userInformation.tenantId
+			)
 
 			if (!docData) {
 				return {
@@ -400,6 +410,27 @@ module.exports = class ProgramUsersService {
 		}
 	}
 
+	static async getMyEntities(loggedInUserId, programId, tenantId, onlyImmediate = true) {
+		try {
+			// Step 1: Find all programUsers for this program where user has hierarchy level 0 or 1
+			const filterQuery = {
+				tenantId: tenantId,
+				programId: programId,
+			}
+			filterQuery['hierarchy.id'] = { $eq: loggedInUserId }
+
+			if (onlyImmediate) {
+				filterQuery['hierarchy.level'] = { $eq: 0 }
+			} else {
+				filterQuery['hierarchy.level'] = { $in: [0, 1] }
+			}
+
+			const allProgramUsers = await programUsersQueries.programUsersDocument(filterQuery, 'all', 'none')
+			return allProgramUsers
+		} catch (error) {
+			throw error
+		}
+	}
 	/**
 	 * Get users NOT mapped to a program
 	 * @method
@@ -499,11 +530,17 @@ module.exports = class ProgramUsersService {
 	 * @param {String} userId - user ID
 	 * @param {String} programId - program ID (optional)
 	 * @param {String} programExternalId - program external ID (optional)
+	 * @param {String} tenantId - tenant ID
 	 * @returns {Object} program user document
 	 */
-	static async findByUserAndProgram(userId, programId, programExternalId) {
+	static async findByUserAndProgram(userId, programId, programExternalId, tenantId) {
 		try {
-			const result = await programUsersQueries.findByUserAndProgram(userId, programId, programExternalId)
+			const result = await programUsersQueries.findByUserAndProgram(
+				userId,
+				programId,
+				programExternalId,
+				tenantId
+			)
 			return result
 		} catch (error) {
 			throw error
