@@ -738,7 +738,7 @@ module.exports = class ProgramUsersHelper {
 			if (!myDoc) {
 				return {
 					success: false,
-					message: 'User is not assigned to program',
+					message: 'Logged in User is not assigned to program',
 				}
 			}
 			const myEntities = await programUsersService.getMyEntities(loggedInUserId, programId, tenantId)
@@ -751,11 +751,10 @@ module.exports = class ProgramUsersHelper {
 						entity: myEntity,
 					}
 				}
-			} else {
-				return {
-					success: false,
-					message: 'Entity is not mapped to the given user in the program',
-				}
+			}
+			return {
+				success: false,
+				message: 'Entity is not mapped to the logged in user in the program',
 			}
 		} catch (error) {
 			console.error('Error checking participant assignment:', error)
@@ -805,7 +804,6 @@ module.exports = class ProgramUsersHelper {
 
 			// Check if logged-in user has this participant assigned
 			const assignmentCheck = await this.checkifEntityAssigned(loggedInUserId, entityId, programId, tenantId)
-
 			if (!assignmentCheck.success) {
 				return {
 					success: false,
@@ -814,8 +812,6 @@ module.exports = class ProgramUsersHelper {
 				}
 			}
 
-			console.log('assignmentCheck', assignmentCheck)
-			return assignmentCheck
 			// Call user service to update the participant's profile using org-admin endpoint
 			const updateResult = await userService.updateProfile(
 				assignmentCheck.entity.userId,

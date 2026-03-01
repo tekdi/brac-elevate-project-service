@@ -402,7 +402,7 @@ module.exports = class ProgramUsersService {
 		}
 	}
 
-	static async getMyEntities(loggedInUserId, programId, tenantId, onlyImmediate = true) {
+	static async getMyEntities(loggedInUserId, programId, tenantId) {
 		try {
 			// Step 1: Find all programUsers for this program where user has hierarchy level 0 or 1
 			const filterQuery = {
@@ -410,12 +410,7 @@ module.exports = class ProgramUsersService {
 				programId: programId,
 			}
 			filterQuery['hierarchy.id'] = { $eq: loggedInUserId }
-
-			if (onlyImmediate) {
-				filterQuery['hierarchy.level'] = { $eq: 0 }
-			} else {
-				filterQuery['hierarchy.level'] = { $in: [0, 1] }
-			}
+			filterQuery['hierarchy.level'] = { $in: [0, 1] }
 
 			const allProgramUsers = await programUsersQueries.programUsersDocument(filterQuery, 'all', 'none')
 			return allProgramUsers

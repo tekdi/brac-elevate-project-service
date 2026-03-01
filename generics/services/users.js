@@ -672,41 +672,27 @@ const updateProfile = function (userId, updateData, userToken, tenantCode, organ
 				organization_id: organizationId,
 			}
 
-			const options = {
-				headers: {
-					'Content-Type': 'application/json',
-					internal_access_token: process.env.INTERNAL_ACCESS_TOKEN,
-					'x-auth-token': userToken,
-					tenantId: tenantCode,
-				},
-				json: bodyData,
+			const headers = {
+				'Content-Type': 'application/json',
+				internal_access_token: process.env.INTERNAL_ACCESS_TOKEN,
+				'x-auth-token': userToken,
+				tenantId: tenantCode,
 			}
 
-			// Use PATCH method for org-admin updateUser endpoint (as per working curl)
-			// request library supports patch method, but if not available, use method option
-			if (request.patch) {
-				request.patch(url, options, updateCallback)
-			} else {
-				// Fallback: use request with method option
-				options.method = 'PATCH'
-				request(url, options, updateCallback)
-			}
+			request.post({ url, headers, body: bodyData, json: true }, callBack)
+
 			let result = {
 				success: true,
 			}
 
-			function updateCallback(err, data) {
-				if (err) {
+			function callBack(error, response, body) {
+				if (error) {
 					result.success = false
-					result.error = err
 				} else {
-					let response = typeof data.body === 'string' ? JSON.parse(data.body) : data.body
-					if (response.responseCode === HTTP_STATUS_CODE['ok'].code) {
-						result['data'] = response.result
+					if (body.responseCode === HTTP_STATUS_CODE['ok'].code) {
+						result['data'] = body.result
 					} else {
 						result.success = false
-						result.message = response.message
-						result.responseCode = response.responseCode
 					}
 				}
 				return resolve(result)
