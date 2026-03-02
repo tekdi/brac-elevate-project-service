@@ -83,7 +83,6 @@ module.exports = class ProgramUsers extends Abstract {
 					entityId = '',
 					sortBy,
 					sortOrder,
-					level,
 				} = req.query
 				const { pageNo = 1, pageSize = 20 } = req
 				const meta = req.body && req.body.meta ? req.body.meta : {}
@@ -125,8 +124,7 @@ module.exports = class ProgramUsers extends Abstract {
 					req.userDetails,
 					meta,
 					sortBy,
-					finalSortOrder,
-					level ? parseInt(level) : undefined
+					finalSortOrder
 				)
 				return resolve(result)
 			} catch (error) {
