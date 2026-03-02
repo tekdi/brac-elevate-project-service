@@ -193,6 +193,7 @@ module.exports = class ProgramUsersHelper {
 	 * @param {Object} meta - meta information for filtering
 	 * @param {String} sortBy - field to sort by
 	 * @param {String} sortOrder - sort order (asc/desc)
+	 * @param {Number} level - hierarchy level (e.g. 2 = Supervisor>LC>Participant, fetch sub-entities)
 	 * @returns {Object} result
 	 */
 	static async getEntitiesWithPagination(
@@ -207,7 +208,8 @@ module.exports = class ProgramUsersHelper {
 		userDetails,
 		meta = {},
 		sortBy = 'name',
-		sortOrder = 'asc'
+		sortOrder = 'asc',
+		level
 	) {
 		try {
 			// Call service
@@ -223,7 +225,8 @@ module.exports = class ProgramUsersHelper {
 				userDetails,
 				meta,
 				sortBy,
-				sortOrder
+				sortOrder,
+				level
 			)
 
 			return {

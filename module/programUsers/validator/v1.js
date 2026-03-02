@@ -139,6 +139,9 @@ module.exports = (req) => {
 
 			// Validate search if provided
 			req.checkQuery('search').isString().withMessage('search must be a string').optional()
+
+			// Validate level if provided (e.g. 2 = Supervisor>LC>Participant)
+			req.checkQuery('level').optional().isInt({ min: 1 }).withMessage('level must be a positive integer')
 		},
 	}
 

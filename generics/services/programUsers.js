@@ -138,6 +138,7 @@ module.exports = class ProgramUsersService {
 	 * @param {Object} meta - meta information for filtering
 	 * @param {String} sortBy - field to sort by
 	 * @param {String} sortOrder - sort order (asc/desc)
+	 * @param {Number} level - hierarchy level (e.g. 2 = Supervisor>LC>Participant, fetch sub-entities)
 	 * @returns {Object} entities with pagination info
 	 */
 	static async getEntitiesWithPagination(
@@ -152,7 +153,8 @@ module.exports = class ProgramUsersService {
 		userDetails,
 		meta = {},
 		sortBy = 'name',
-		sortOrder = 'asc'
+		sortOrder = 'asc',
+		level
 	) {
 		try {
 			const skip = (page - 1) * limit
@@ -189,6 +191,25 @@ module.exports = class ProgramUsersService {
 						result: { data: [], overview: docData.overview || {} },
 					}
 				}
+			}
+
+			// When level=2: fetch sub-entities (e.g. Supervisor>LC>Participant - get LCs + their Participants)
+			if (level === 2) {
+				const firstLevelEntities = [...filteredEntities]
+				const subEntities = []
+
+				for (const entity of firstLevelEntities) {
+					const entityUserId = entity.userId
+					if (!entityUserId) continue
+
+					const subProgramUser = await this.findByUserAndProgram(entityUserId, programId, programExternalId)
+					if (subProgramUser && subProgramUser.entities && subProgramUser.entities.length > 0) {
+						subEntities.push(...subProgramUser.entities)
+					}
+				}
+
+				// Merge: first level entities first, then sub-entities
+				filteredEntities = [...firstLevelEntities, ...subEntities]
 			}
 
 			// Filter by status if provided (supports comma-separated values)
