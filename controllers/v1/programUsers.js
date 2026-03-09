@@ -161,7 +161,7 @@ module.exports = class ProgramUsers extends Abstract {
 				const meta = req.body && req.body.meta ? req.body.meta : {}
 				const body = req.body || {}
 
-				// userIds from query (GET) or body (POST)
+				// userIds is optional. If passed in query or body, use it for filtering; otherwise search returns empty (programId/programExternalId still required).
 				let userIds = []
 				if (queryUserIds) {
 					userIds = Array.isArray(queryUserIds)
@@ -203,13 +203,6 @@ module.exports = class ProgramUsers extends Abstract {
 						finalSortOrder
 					)
 					return resolve(result)
-				}
-
-				if (userIds.length === 0) {
-					return reject({
-						status: HTTP_STATUS_CODE.bad_request.status,
-						message: 'userIds is required (query or body)',
-					})
 				}
 
 				const result = await programUsersService.searchProgramUsers(
