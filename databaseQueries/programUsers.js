@@ -292,6 +292,71 @@ module.exports = class programUsers {
 			}
 		})
 	}
+
+	/**
+	 * Find program users by userIds array - single query, latest by updatedAt per userId
+	 * @method
+	 * @name findByUserIdsAndProgram
+	 * @param {Array} userIds - array of user IDs
+	 * @param {String} programId - program ID (optional)
+	 * @param {String} programExternalId - program external ID (optional)
+	 * @param {String} tenantId - tenant ID (optional)
+	 * @returns {Array} program user documents (one per userId, latest by updatedAt)
+	 */
+	static findByUserIdsAndProgram(userIds, programId, programExternalId, tenantId) {
+		return new Promise(async (resolve, reject) => {
+			try {
+				if (!Array.isArray(userIds) || userIds.length === 0) {
+					return resolve([])
+				}
+
+				// Normalize userIds (both string + number support)
+				const normalizedIds = [
+					...new Set(
+						userIds.flatMap((uid) => {
+							const str = String(uid)
+							const num = Number(uid)
+							return !isNaN(num) && String(num) === str ? [str, num] : [str]
+						})
+					),
+				]
+
+				const buildPipeline = (includeTenant = true) => {
+					const match = { userId: { $in: normalizedIds } }
+					if (programId) match.programId = programId
+					else if (programExternalId) match.programExternalId = programExternalId
+					if (includeTenant && tenantId) match.tenantId = tenantId
+
+					return [
+						{ $match: match },
+						{ $sort: { updatedAt: -1 } },
+						{
+							$group: {
+								_id: '$userId',
+								doc: { $first: '$$ROOT' },
+							},
+						},
+						{ $replaceRoot: { newRoot: '$doc' } },
+						{ $project: { userId: 1, overview: 1, metaInformation: 1 } },
+					]
+				}
+
+				let docs = await database.models.programUsers.aggregate(buildPipeline(true)).exec()
+
+				// Fallback without tenant when no results
+				if (docs.length === 0 && tenantId) {
+					docs = await database.models.programUsers.aggregate(buildPipeline(false)).exec()
+				}
+
+				const lookup = new Map()
+				docs.forEach((doc) => lookup.set(String(doc.userId), doc))
+				const result = userIds.map((uid) => lookup.get(String(uid)) || null)
+				return resolve(result)
+			} catch (error) {
+				return reject(error)
+			}
+		})
+	}
 	/**
 	 * Find program user by userId and either programId or programExternalId
 	 * @method

@@ -153,12 +153,26 @@ module.exports = class ProgramUsers extends Abstract {
 					type = 'all',
 					search = '',
 					excludeMapped = false,
-					userIds = [],
+					userIds: queryUserIds,
 					sortBy: querySortBy,
 					sortOrder,
 				} = req.query
 				const { pageNo = 1, pageSize = 20 } = req
 				const meta = req.body && req.body.meta ? req.body.meta : {}
+				const body = req.body || {}
+
+				// userIds is optional. If passed in query or body, use it for filtering; otherwise search returns empty (programId/programExternalId still required).
+				let userIds = []
+				if (queryUserIds) {
+					userIds = Array.isArray(queryUserIds)
+						? queryUserIds
+						: String(queryUserIds)
+								.split(',')
+								.map((id) => String(id).trim())
+								.filter(Boolean)
+				} else if (body.userIds && Array.isArray(body.userIds)) {
+					userIds = body.userIds.map((id) => String(id).trim()).filter(Boolean)
+				}
 
 				// Set default sorting: name asc
 				const sortBy = querySortBy || 'name'
@@ -191,19 +205,11 @@ module.exports = class ProgramUsers extends Abstract {
 					return resolve(result)
 				}
 
-				// Original behavior: get mapped users
-				const result = await programUsersService.searhProgramUsers(
+				const result = await programUsersService.searchProgramUsers(
 					programId,
 					programExternalId,
 					userIds,
-					parseInt(pageNo),
-					parseInt(pageSize),
-					status,
-					search,
-					req.userDetails,
-					meta,
-					sortBy,
-					finalSortOrder
+					req.userDetails
 				)
 				return resolve(result)
 			} catch (error) {
