@@ -3627,13 +3627,6 @@ module.exports = class UserProjectsHelper {
 	static generateCertificate(data) {
 		return new Promise(async (resolve, reject) => {
 			try {
-				// Do not generate certificate for private program unless env ALLOW_CERTIFICATE_FOR_PRIVATE_PROGRAM is "true"
-				if (data.isAPrivateProgram === true && process.env.ALLOW_CERTIFICATE_FOR_PRIVATE_PROGRAM !== 'true') {
-					return resolve({
-						success: false,
-						message: CONSTANTS.apiResponses.NOT_ELIGIBLE_FOR_CERTIFICATE,
-					})
-				}
 				// check eligibility of project for certificate creation
 				let eligibility = await this.checkCertificateEligibility(data)
 
@@ -4716,7 +4709,7 @@ module.exports = class UserProjectsHelper {
 	static createProjectPlan(data, userId, userToken, userDetails) {
 		return new Promise(async (resolve, reject) => {
 			try {
-				const { templates, userId: participantId, entityId, programName, projectConfig } = data
+				const { templates, userId: participantId, entityId, programName, projectConfig, baseTemplateId } = data
 				let tenantId = userDetails.userInformation.tenantId
 				let orgId = userDetails.userInformation.organizationId
 
@@ -4828,10 +4821,10 @@ module.exports = class UserProjectsHelper {
 				const masterProgramId = programAndSolutionInformation.result.program._id
 				const masterSolutionId = programAndSolutionInformation.result.solution._id
 
-				// Step 2b: Create certificate template for project plan (same as detailsV2 / IDP flow). Use baseTemplateId from env.
+				// Step 2b: Create certificate template for project plan (same as detailsV2 / IDP flow). Use baseTemplateId from request body (data.baseTemplateId).
 				let certificateTemplateIdForProject = null
-				const baseTemplateId = process.env.CERTIFICATE_BASE_TEMPLATE_ID
-				if (baseTemplateId && baseTemplateId.trim() !== '') {
+				const baseTemplateIdStr = baseTemplateId ? String(baseTemplateId).trim() : ''
+				if (baseTemplateIdStr !== '') {
 					try {
 						const userDetailsForCertificate = {
 							...userDetails,
@@ -4843,7 +4836,7 @@ module.exports = class UserProjectsHelper {
 						// Fetch base template to get templateUrl (certificate template needs it for generation)
 						let templateUrl = ''
 						const baseTemplateDocs = await certificateBaseTemplateQueries.findDocument(
-							{ _id: baseTemplateId.trim(), tenantId: tenantId },
+							{ _id: baseTemplateIdStr, tenantId: tenantId },
 							['url']
 						)
 						if (baseTemplateDocs && baseTemplateDocs.length > 0 && baseTemplateDocs[0].url) {
@@ -4872,7 +4865,7 @@ module.exports = class UserProjectsHelper {
 							status: 'active',
 							solutionId: masterSolutionId.toString(),
 							programId: masterProgramId.toString(),
-							baseTemplateId: baseTemplateId.trim(),
+							baseTemplateId: baseTemplateIdStr,
 						}
 						if (templateUrl && templateUrl !== '') {
 							certificateTemplateBody.templateUrl = templateUrl

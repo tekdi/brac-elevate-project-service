@@ -60,11 +60,6 @@ let enviromentVariables = {
 		optional: false,
 		default: 'ON',
 	},
-	CERTIFICATE_BASE_TEMPLATE_ID: {
-		message:
-			'Certificate base template id for project plan certificate (createProjectPlan). If set, a certificate template is created and linked to the solution.',
-		optional: true,
-	},
 	ALLOW_CERTIFICATE_FOR_PRIVATE_PROGRAM: {
 		message:
 			'If "true", private program projects can have certificate (attach at creation and allow certificate generation). If not set or not "true", private program projects will not get certificate.',
