@@ -20,6 +20,8 @@ const userService = require(GENERICS_FILES_PATH + '/services/users')
 const solutionsHelper = require(MODULES_BASE_PATH + '/solutions/helper')
 const programsHelper = require(MODULES_BASE_PATH + '/programs/helper')
 const certificateTemplateQueries = require(DB_QUERY_BASE_PATH + '/certificateTemplates')
+const certificateBaseTemplateQueries = require(DB_QUERY_BASE_PATH + '/certificateBaseTemplates')
+const certificateTemplatesHelper = require(MODULES_BASE_PATH + '/certificateTemplates/helper')
 const certificateValidationsHelper = require(MODULES_BASE_PATH + '/certificateValidations/helper')
 const programUsersQueries = require(DB_QUERY_BASE_PATH + '/programUsers')
 const solutionsQueries = require(DB_QUERY_BASE_PATH + '/solutions')
@@ -1984,8 +1986,11 @@ module.exports = class UserProjectsHelper {
 							}
 						}
 
-						// remove certificate object if project is of type private
-						if (projectCreation.data.isAPrivateProgram) {
+						// remove certificate object if project is of type private and env does not allow certificate for private program
+						if (
+							projectCreation.data.isAPrivateProgram &&
+							process.env.ALLOW_CERTIFICATE_FOR_PRIVATE_PROGRAM !== 'true'
+						) {
 							delete projectCreation.data.certificate
 							delete projectCreation.data.certificateTemplateId
 						}
@@ -3622,8 +3627,16 @@ module.exports = class UserProjectsHelper {
 	static generateCertificate(data) {
 		return new Promise(async (resolve, reject) => {
 			try {
+				// Do not generate certificate for private program unless env ALLOW_CERTIFICATE_FOR_PRIVATE_PROGRAM is "true"
+				if (data.isAPrivateProgram === true && process.env.ALLOW_CERTIFICATE_FOR_PRIVATE_PROGRAM !== 'true') {
+					return resolve({
+						success: false,
+						message: CONSTANTS.apiResponses.NOT_ELIGIBLE_FOR_CERTIFICATE,
+					})
+				}
 				// check eligibility of project for certificate creation
 				let eligibility = await this.checkCertificateEligibility(data)
+
 				if (!eligibility) {
 					throw {
 						message: CONSTANTS.apiResponses.NOT_ELIGIBLE_FOR_CERTIFICATE,
@@ -4815,6 +4828,82 @@ module.exports = class UserProjectsHelper {
 				const masterProgramId = programAndSolutionInformation.result.program._id
 				const masterSolutionId = programAndSolutionInformation.result.solution._id
 
+				// Step 2b: Create certificate template for project plan (same as detailsV2 / IDP flow). Use baseTemplateId from env.
+				let certificateTemplateIdForProject = null
+				const baseTemplateId = process.env.CERTIFICATE_BASE_TEMPLATE_ID
+				if (baseTemplateId && baseTemplateId.trim() !== '') {
+					try {
+						const userDetailsForCertificate = {
+							...userDetails,
+							tenantAndOrgInfo: userDetails.tenantAndOrgInfo || {
+								tenantId: tenantId,
+								orgId: Array.isArray(orgId) ? orgId : [orgId],
+							},
+						}
+						// Fetch base template to get templateUrl (certificate template needs it for generation)
+						let templateUrl = ''
+						const baseTemplateDocs = await certificateBaseTemplateQueries.findDocument(
+							{ _id: baseTemplateId.trim(), tenantId: tenantId },
+							['url']
+						)
+						if (baseTemplateDocs && baseTemplateDocs.length > 0 && baseTemplateDocs[0].url) {
+							templateUrl = baseTemplateDocs[0].url
+						}
+						const certificateTemplateBody = {
+							criteria: {
+								validationText: 'Complete validation message',
+								expression: 'C1',
+								conditions: {
+									C1: {
+										validationText: 'Submit your project.',
+										expression: 'C1',
+										conditions: {
+											C1: {
+												scope: 'project',
+												key: 'status',
+												operator: '==',
+												value: 'submitted',
+											},
+										},
+									},
+								},
+							},
+							issuer: { name: 'Certificate Issuer' },
+							status: 'active',
+							solutionId: masterSolutionId.toString(),
+							programId: masterProgramId.toString(),
+							baseTemplateId: baseTemplateId.trim(),
+						}
+						if (templateUrl && templateUrl !== '') {
+							certificateTemplateBody.templateUrl = templateUrl
+						}
+						const certificateTemplateCreated = await certificateTemplatesHelper.create(
+							certificateTemplateBody,
+							userDetailsForCertificate
+						)
+
+						if (
+							certificateTemplateCreated &&
+							certificateTemplateCreated.result &&
+							certificateTemplateCreated.result._id
+						) {
+							certificateTemplateIdForProject = certificateTemplateCreated.result._id
+							await solutionsQueries.updateSolutionDocument(
+								{ _id: masterSolutionId },
+								{ $set: { certificateTemplateId: certificateTemplateIdForProject } }
+							)
+						}
+					} catch (certErr) {
+						// Do not fail project plan creation if certificate template creation fails
+						if (global.logger) {
+							global.logger.error('createProjectPlan: certificate template creation failed', {
+								err: certErr && certErr.message,
+								masterSolutionId: masterSolutionId && masterSolutionId.toString(),
+							})
+						}
+					}
+				}
+
 				let acl = {}
 				if (userDetails.userInformation.userId != participantId) {
 					acl = {
@@ -4870,6 +4959,27 @@ module.exports = class UserProjectsHelper {
 					_id: template._id instanceof global.ObjectId ? template._id : new global.ObjectId(template._id),
 					externalId: template.externalId,
 				}))
+
+				// Add certificate template details to project data if present (same as detailsV2 / IDP). Project plan is private program; only add certificate when env allows.
+				if (
+					process.env.ALLOW_CERTIFICATE_FOR_PRIVATE_PROGRAM === 'true' &&
+					certificateTemplateIdForProject &&
+					certificateTemplateIdForProject !== ''
+				) {
+					const certificateTemplateDetails = await certificateTemplateQueries.certificateTemplateDocument({
+						_id: certificateTemplateIdForProject,
+						tenantId: tenantId,
+					})
+
+					if (certificateTemplateDetails && certificateTemplateDetails.length > 0) {
+						projectData['certificate'] = _.pick(certificateTemplateDetails[0], [
+							'templateUrl',
+							'status',
+							'criteria',
+						])
+						projectData['certificate']['templateId'] = certificateTemplateIdForProject
+					}
+				}
 
 				// Add entity information if provided
 				if (entityId) {
