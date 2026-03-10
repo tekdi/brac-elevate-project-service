@@ -60,6 +60,11 @@ let enviromentVariables = {
 		optional: false,
 		default: 'ON',
 	},
+	ALLOW_CERTIFICATE_FOR_PRIVATE_PROGRAM: {
+		message:
+			'If "true", private program projects can have certificate (attach at creation and allow certificate generation). If not set or not "true", private program projects will not get certificate.',
+		optional: true,
+	},
 	// cloud service variables
 	CLOUD_STORAGE_PROVIDER: {
 		message: 'Require cloud storage provider',
