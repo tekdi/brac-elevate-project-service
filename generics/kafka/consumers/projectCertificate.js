@@ -21,6 +21,7 @@ var messageReceived = function (message) {
 		try {
 			// This consumer is consuming from an old topic : PROJECT_CERTIFICATE_TOPIC, which is no more used by data team. ie) using existig topic instead of creating new one.
 			let parsedMessage = JSON.parse(message.value)
+			console.log('parsedMessage', parsedMessage)
 			if (
 				parsedMessage.status == CONSTANTS.common.SUBMITTED_STATUS &&
 				parsedMessage.certificate &&
