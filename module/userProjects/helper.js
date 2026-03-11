@@ -3624,7 +3624,7 @@ module.exports = class UserProjectsHelper {
 	 * @returns {JSON} certificate details.
 	 */
 
-	static generateCertificate(data) {
+	static generateCertificate(data, asynchMode = true) {
 		return new Promise(async (resolve, reject) => {
 			try {
 				// check eligibility of project for certificate creation
@@ -3640,7 +3640,7 @@ module.exports = class UserProjectsHelper {
 				const certificateData = await this.createCertificatePayload(data)
 
 				// call certificateService to create certificate for project
-				const certificate = await this.createCertificate(certificateData, data._id)
+				const certificate = await this.createCertificate(certificateData, data._id, asynchMode)
 
 				return resolve(certificate)
 			} catch (error) {
