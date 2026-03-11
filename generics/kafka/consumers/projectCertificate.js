@@ -6,7 +6,7 @@
  */
 
 //dependencies
-const userProjectsHelper = require(MODULES_BASE_PATH + '/userProjects/helper')
+const userProjectsHelper = require(MODULES_BASE_PATH + "/userProjects/helper");
 
 /**
  * submission consumer message received.
