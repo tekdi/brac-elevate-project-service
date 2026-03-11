@@ -6999,7 +6999,8 @@ async function checkAndCompleteProject(projectId) {
 		'status',
 	])
 
-	if (!project.length > 0) {
+	// if project is not found or project is already completed or submitted, return
+	if (!project.length > 0 || project[0].status === 'completed' || project[0].status === 'submitted') {
 		return
 	}
 
