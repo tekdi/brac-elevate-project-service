@@ -1339,6 +1339,14 @@ module.exports = class UserProjectsHelper {
 						idpProgress: progressStats,
 						status: progressStats.projectStatus === 'completed' ? 'COMPLETED' : 'IN_PROGRESS',
 					}
+				} else if (
+					entity.status == 'COMPLETED' &&
+					entity.idpProjectId?.toString() === projectStringId &&
+					progressStats.projectStatus === 'submitted'
+				) {
+					updatePayload = {
+						idpProgress: progressStats,
+					}
 				}
 
 				// 5. Execute Updates
