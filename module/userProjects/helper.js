@@ -4522,6 +4522,7 @@ module.exports = class UserProjectsHelper {
 				}
 				if (updateData.tasks && updateData.tasks.length > 0) {
 					updateData.tasks = _fillMissingTaskInformation(updateData.tasks, userProject[0].tasks)
+					_appendNewChildExternalIdsToTaskSequence(updateData.tasks, userProject[0].tasks)
 
 					let allTasksFalttened = []
 					for (let eachTask of updateData.tasks) {
@@ -6046,6 +6047,50 @@ function validateAllTasks(tasks) {
 }
 
 /**
+ * After merge, append externalIds of newly added children to the parent's taskSequence.
+ * @param {Array} tasks - Tasks after merge with DB.
+ * @param {Array} tasksFromDB - Tasks as stored before update.
+ */
+function _appendNewChildExternalIdsToTaskSequence(tasks, tasksFromDB) {
+	if (!tasks || !tasksFromDB) {
+		return
+	}
+	for (const task of tasks) {
+		const fromDb = tasksFromDB.find((t) => t._id == task._id)
+		if (fromDb) {
+			_appendNewChildExternalIdsToTaskSequenceForParent(task, fromDb)
+		}
+	}
+}
+
+function _appendNewChildExternalIdsToTaskSequenceForParent(task, fromDb) {
+	const dbChildren = fromDb.children || []
+	const dbChildIds = new Set(dbChildren.map((c) => String(c._id)))
+
+	let seq = Array.isArray(task.taskSequence) ? task.taskSequence.filter((id) => typeof id === 'string') : []
+	if (seq.length === 0 && Array.isArray(fromDb.taskSequence)) {
+		seq = fromDb.taskSequence.filter((id) => typeof id === 'string')
+	}
+	if (seq.length === 0 && task.children && task.children.length > 0) {
+		seq = task.children.map((c) => c.externalId).filter((id) => typeof id === 'string')
+	}
+
+	for (const child of task.children || []) {
+		if (!dbChildIds.has(String(child._id))) {
+			const ext = child.externalId
+			if (ext && typeof ext === 'string' && !seq.includes(ext)) {
+				seq.push(ext)
+			}
+		}
+		const dbChild = dbChildren.find((c) => String(c._id) === String(child._id))
+		if (dbChild && child.children && child.children.length > 0) {
+			_appendNewChildExternalIdsToTaskSequenceForParent(child, dbChild)
+		}
+	}
+	task.taskSequence = seq
+}
+
+/**
  * Fill missing information in tasks from database.
  * @method
  * @name _fillMissingTaskInformation
@@ -6075,6 +6120,20 @@ function fillMissingProperties(eachTask, targetTask) {
 	const dateSpecificFields = ['createdAt', 'updatedAt', 'syncedAt']
 	for (let key in targetTask) {
 		if (Array.isArray(targetTask[key])) {
+			// taskSequence is string[] (externalIds); object-merge would spread strings into char-keyed objects
+			if (key === 'taskSequence') {
+				if (eachTask[key] && eachTask[key].length > 0) {
+					const incoming = eachTask[key]
+					if (incoming.every((el) => typeof el === 'string')) {
+						eachTask[key] = [...incoming]
+					} else {
+						eachTask[key] = [...targetTask[key]]
+					}
+				} else {
+					eachTask[key] = [...targetTask[key]]
+				}
+				continue
+			}
 			if (!eachTask[key] || eachTask[key].length === 0) {
 				// If the array is missing or empty, copy the entire array from the targetTask
 				eachTask[key] = [...targetTask[key]]
