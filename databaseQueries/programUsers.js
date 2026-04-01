@@ -76,12 +76,19 @@ module.exports = class programUsers {
 
 				let result = await database.models.programUsers.findOneAndUpdate(filterData, updateData, finalOptions)
 
-				// If metaInformation needs to be set, do it separately
-				if (metaInformationToSet && result && result._id) {
+				// If metaInformation needs to be set, merge with existing (API payload must not replace whole object)
+				if (metaInformationToSet && result && result._id && Object.keys(metaInformationToSet).length > 0) {
+					const existingMeta =
+						result.metaInformation &&
+						typeof result.metaInformation === 'object' &&
+						!Array.isArray(result.metaInformation)
+							? result.metaInformation
+							: {}
+					const mergedMeta = { ...existingMeta, ...metaInformationToSet }
 					result = await database.models.programUsers.findOneAndUpdate(
 						{ _id: result._id },
 						{
-							$set: { metaInformation: metaInformationToSet, updatedAt: new Date() },
+							$set: { metaInformation: mergedMeta, updatedAt: new Date() },
 						},
 						{ new: true, lean: true }
 					)

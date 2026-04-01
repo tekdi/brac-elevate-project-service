@@ -1256,13 +1256,13 @@ module.exports = class UserProjectsHelper {
 					// }
 				}
 
-				if (process.env.PUSH_SUBMISION_STATUS_TO_TASK === 'true') {
-					const completeProject = await checkAndCompleteProject(projectId)
+				//if (process.env.PUSH_SUBMISION_STATUS_TO_TASK === 'true') {
+				//const completeProject = await checkAndCompleteProject(projectId)
 
-					if (process.env.ENABLE_PROGRAM_USER_MAPPING === 'true') {
-						await this.updateProgramUserMapping(projectId)
-					}
+				if (process.env.ENABLE_PROGRAM_USER_MAPPING === 'true') {
+					await this.updateProgramUserMapping(projectId)
 				}
+				//}
 
 				if (!tasksUpdated._id) {
 					throw {
@@ -1284,8 +1284,6 @@ module.exports = class UserProjectsHelper {
 	static updateProgramUserMapping(projectId) {
 		return new Promise(async (resolve, reject) => {
 			try {
-				const progressStats = await getTaskCompletionStats(projectId)
-
 				const projects = await projectQueries.projectDocument({ _id: projectId }, [
 					'userId',
 					'programId',
@@ -1302,7 +1300,7 @@ module.exports = class UserProjectsHelper {
 					}
 				}
 				const project = projects[0]
-
+				const progressStats = await getTaskCompletionStats(projectId)
 				const isSelfCreated = project.userId.toString() === project.createdBy.toString()
 
 				// 2. Determine target Program ID and User ID
@@ -1333,11 +1331,23 @@ module.exports = class UserProjectsHelper {
 
 				// 4. Unified Logic for Progress Updates
 				if (entity.status === 'NOT_ONBOARDED' && entity.onBoardedProjectId?.toString() === projectStringId) {
-					updatePayload = { onBoardingProgress: progressStats }
-				} else if (entity.status === 'IN_PROGRESS' && entity.idpProjectId?.toString() === projectStringId) {
+					updatePayload = {
+						onBoardingProgress: progressStats,
+						status: progressStats.projectStatus === 'completed' ? 'ONBOARDED' : 'NOT_ONBOARDED',
+					}
+					if (progressStats.projectStatus === 'completed') {
+						updatePayload.onBoardingProjectCompletedAt = new Date()
+					}
+				} else if (
+					(entity.status === 'IN_PROGRESS' || entity.status === 'COMPLETED') &&
+					entity.idpProjectId?.toString() === projectStringId
+				) {
 					updatePayload = {
 						idpProgress: progressStats,
-						status: progressStats.projectStatus === 'completed' ? 'COMPLETED' : 'IN_PROGRESS',
+					}
+					if (progressStats.projectStatus == 'completed') {
+						updatePayload.idpProjectCompletedAt = new Date()
+						updatePayload.status = 'COMPLETED'
 					}
 				}
 
@@ -1351,6 +1361,15 @@ module.exports = class UserProjectsHelper {
 						updatePayload,
 						project.tenantId
 					)
+					const entityStatus = updatePayload.status
+					delete updatePayload.status
+					await programUsersService.createOrUpdate({
+						userId: entity.userId,
+						programId: targetProgramId,
+						tenantId: project.tenantId,
+						metaInformation: updatePayload,
+						status: entityStatus,
+					})
 
 					// Additional step for Scenario 2: Sync the assigned user's record
 					if (!isSelfCreated) {
@@ -1359,8 +1378,8 @@ module.exports = class UserProjectsHelper {
 							programId: project.programId,
 							programExternalId: project.programExternalId,
 							tenantId: project.tenantId,
-							metaInformation: { idpProgress: progressStats },
-							status: updatePayload.status,
+							metaInformation: updatePayload,
+							status: entityStatus,
 						})
 					}
 				}
@@ -4547,7 +4566,7 @@ module.exports = class UserProjectsHelper {
 					appVersion,
 					true
 				)
-				const completeProject = await checkAndCompleteProject(projectId)
+				//const completeProject = await checkAndCompleteProject(projectId)
 				const progress = await getTaskCompletionStats(projectId)
 				if (process.env.ENABLE_PROGRAM_USER_MAPPING === 'true') {
 					await this.updateProgramUserMapping(projectId)
@@ -5294,6 +5313,10 @@ module.exports = class UserProjectsHelper {
 
 				// Push to Kafka for event streaming
 				await this.attachEntityInformationIfExists(createdProject)
+				// console.log('createdProject', createdProject);
+				// if (process.env.ENABLE_PROGRAM_USER_MAPPING === 'true') {
+				// 	await this.updateProgramUserMapping(createdProject._id);
+				// }
 				// let programUserMapping = await createProgramUserMapping({
 				// 	userId: participantId,
 				// 	project: createdProject,
