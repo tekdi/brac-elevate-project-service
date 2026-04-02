@@ -268,6 +268,40 @@ module.exports = class ProgramUsersService {
 	}
 
 	/**
+	 * Search program users by userIds - returns overview, userId, metaInformation (latest by updatedAt per userId)
+	 * @method
+	 * @name searchProgramUsers
+	 * @param {String} programId - program ID (optional)
+	 * @param {String} programExternalId - program external ID (optional)
+	 * @param {Array} userIds - array of user IDs
+	 * @param {Object} userDetails - user details
+	 * @returns {Object} program users with overview, userId, metaInformation
+	 */
+	static async searchProgramUsers(programId, programExternalId, userIds = [], userDetails) {
+		try {
+			const tenantId = userDetails?.userInformation?.tenantId || userDetails?.userInformation?.tenant_code
+
+			const results = await programUsersQueries.findByUserIdsAndProgram(
+				userIds,
+				programId,
+				programExternalId,
+				tenantId
+			)
+
+			return {
+				status: 200,
+				message: 'Program users search completed successfully',
+				data: { data: results },
+				result: { data: results },
+				count: results.filter(Boolean).length,
+				total: results.filter(Boolean).length,
+			}
+		} catch (error) {
+			throw error
+		}
+	}
+
+	/**
 	 * Get program user entities with pagination
 	 * @method
 	 * @name searhProgramUsers
