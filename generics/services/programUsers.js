@@ -268,7 +268,7 @@ module.exports = class ProgramUsersService {
 	}
 
 	/**
-	 * Get program user entities with pagination
+	 * Get program users by program and userIds (with status, paging, sorting)
 	 * @method
 	 * @name searhProgramUsers
 	 * @param {String} programId - program ID (optional)
@@ -276,7 +276,7 @@ module.exports = class ProgramUsersService {
 	 * @param {Array} userIds - array of user IDs
 	 * @param {Number} page - page number
 	 * @param {Number} limit - items per page
-	 * @param {String} status - status filter
+	 * @param {String|Array} status - status filter
 	 * @param {String} searchQuery - search text
 	 * @param {Object} userDetails - user details
 	 * @param {Object} meta - meta information for filtering
@@ -298,112 +298,76 @@ module.exports = class ProgramUsersService {
 		sortOrder = 'asc'
 	) {
 		try {
-			const skip = (page - 1) * limit
-
-			// Find document by userId and either programId or programExternalId
-			const docData = await this.findByUserAndProgram(
-				userId,
-				programId,
-				programExternalId,
-				userDetails.userInformation.tenantId
-			)
-
-			if (!docData) {
+			if (!programId && !programExternalId) {
 				return {
-					status: 404,
-					message: 'Program user not found',
-					data: [],
+					status: 400,
+					message: 'Either programId or programExternalId is required',
+					data: { data: [], count: 0, total: 0 },
+					result: { data: [], count: 0, total: 0 },
 				}
 			}
 
-			// Get entities from the found document
-			let filteredEntities = docData.entities || []
+			const skip = (page - 1) * limit
+			const filterQuery = {}
 
-			// Filter by specific entityId if provided
-			if (entityId) {
-				filteredEntities = filteredEntities.filter(
-					(entity) => entity.userId === entityId || entity.entityId === entityId
-				)
-				if (filteredEntities.length === 0) {
-					return {
-						status: 200,
-						message: 'Entity not found',
-						data: { data: [], overview: docData.overview || {} },
-						result: { data: [], overview: docData.overview || {} },
-					}
-				}
+			if (programId) {
+				filterQuery.programId = programId
+			} else if (programExternalId) {
+				filterQuery.programExternalId = programExternalId
 			}
 
-			// Filter by status if provided (supports comma-separated values)
+			if (Array.isArray(userIds) && userIds.length > 0) {
+				filterQuery.userId = { $in: userIds }
+			}
+
 			if (status) {
-				// Parse comma-separated status values into an array
 				const statusArray =
 					typeof status === 'string'
 						? status
 								.split(',')
 								.map((s) => s.trim())
 								.filter((s) => s.length > 0)
+						: Array.isArray(status)
+						? status
 						: [status]
 
-				filteredEntities = filteredEntities.filter((entity) => statusArray.includes(entity.status))
+				if (statusArray.length > 0) {
+					filterQuery.status = { $in: statusArray }
+				}
 			}
 
-			// Filter by search query if provided
-			if (searchQuery) {
-				const lowerSearch = searchQuery.toLowerCase()
-				filteredEntities = filteredEntities.filter((entity) => {
-					// Assuming entity has a 'name' field to search against
-					return entity.name && entity.name.toLowerCase().includes(lowerSearch)
+			let programUsers = await programUsersQueries.programUsersDocument(filterQuery, 'all', 'none')
+
+			if (searchQuery && searchQuery.trim() !== '') {
+				const q = searchQuery.trim().toLowerCase()
+				programUsers = programUsers.filter((doc) => {
+					return (
+						(doc.userId && doc.userId.toLowerCase().includes(q)) ||
+						(doc.programId && doc.programId.toLowerCase().includes(q)) ||
+						(doc.programExternalId && doc.programExternalId.toLowerCase().includes(q))
+					)
 				})
 			}
 
-			// Apply pagination
-			const totalCount = filteredEntities.length
-			const paginatedEntities = filteredEntities.slice(skip, skip + limit)
-
-			const userIds = paginatedEntities.map((entity) => entity.userId).filter(Boolean)
-			// Fetch user details from user service
-			const { success, data } =
-				(await userService.accountSearch(
-					userIds,
-					userDetails.userInformation.tenantId,
-					'all',
-					[],
-					searchQuery,
-					page,
-					limit,
-					meta,
-					sortBy,
-					sortOrder
-				)) || {}
-
-			// Throw error if no valid users returned from service
-			if (!success || !data || data.count === 0) {
-				return {
-					success: true,
-					status: 200,
-					message: 'No valid users found for the provided entity user IDs.',
-					data: { data: [], overview: docData.overview || {} },
-					result: { data: [], overview: docData.overview || {} },
-				}
+			if (sortBy) {
+				programUsers = programUsers.sort((a, b) => {
+					const aVal = (a[sortBy] || '').toString().toLowerCase()
+					const bVal = (b[sortBy] || '').toString().toLowerCase()
+					if (aVal < bVal) return sortOrder.toLowerCase() === 'desc' ? 1 : -1
+					if (aVal > bVal) return sortOrder.toLowerCase() === 'desc' ? -1 : 1
+					return 0
+				})
 			}
 
-			// Map accountSearch data with entity data from docData and filter by searchQuery
-			const filteredData = paginatedEntities.map((entity) => {
-				const userData = data.data.find((user) => user.id == entity.userId)
-				return {
-					...entity,
-					userDetails: userData || null,
-				}
-			})
+			const totalCount = programUsers.length
+			const pagedData = programUsers.slice(skip, skip + limit)
 
 			return {
 				status: 200,
-				message: 'Entities retrieved successfully',
-				data: { data: filteredData, overview: docData.overview || {} },
-				result: { data: filteredData, overview: docData.overview || {} },
-				count: filteredData.length,
-				total: totalCount,
+				message: 'Program users fetched successfully',
+				data: { data: pagedData, count: pagedData.length, total: totalCount },
+				result: { data: pagedData, count: pagedData.length, total: totalCount },
+				count: pagedData.length,
 			}
 		} catch (error) {
 			throw error
