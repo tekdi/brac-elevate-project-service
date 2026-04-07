@@ -153,12 +153,12 @@ module.exports = class ProgramUsers extends Abstract {
 					type = 'all',
 					search = '',
 					excludeMapped = false,
-					userIds = [],
 					sortBy: querySortBy,
 					sortOrder,
 				} = req.query
 				const { pageNo = 1, pageSize = 20 } = req
 				const meta = req.body && req.body.meta ? req.body.meta : {}
+				const userIds = req.body && req.body.userIds ? req.body.userIds : []
 
 				// Set default sorting: name asc
 				const sortBy = querySortBy || 'name'

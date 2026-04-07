@@ -1305,8 +1305,8 @@ module.exports = class UserProjectsHelper {
 
 				// 2. Determine target Program ID and User ID
 				// If Scenario 2 (IDP), we look up the creator's record via referenceFrom
-				const targetProgramId = isSelfCreated ? project.programId : project.referenceFrom
-				const targetUserId = project.createdBy
+				let targetProgramId = isSelfCreated ? project.programId.toString() : project.referenceFrom.toString()
+				const targetUserId = project.createdBy.toString()
 
 				// 3. Fetch Program User Document
 				const [programUser] = await programUsersQueries.programUsersDocument(
