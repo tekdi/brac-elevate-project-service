@@ -6102,23 +6102,31 @@ function fillMissingProperties(eachTask, targetTask) {
 				// If the array is missing or empty, copy the entire array from the targetTask
 				eachTask[key] = [...targetTask[key]]
 			} else {
-				// Merge the two arrays: existing data from DB and incoming updates
-				const updatedArray = []
+				// Merge the two arrays while preserving original order from DB
+				const mergedArray = []
+				const incomingItemsMap = new Map(eachTask[key].map((item) => [String(item._id), item]))
 
-				// Map over the incoming array (eachTask[key]) to fill missing properties
-				eachTask[key].forEach((item) => {
-					const targetItem = targetTask[key].find((dbItem) => dbItem._id === item._id) || {}
-					const updatedItem = { ...targetItem, ...item } // Merge incoming and existing data
-					fillMissingProperties(updatedItem, targetItem)
-					updatedArray.push(updatedItem)
+				// First, iterate through DB array to maintain original order
+				targetTask[key].forEach((dbItem) => {
+					const incomingItem = incomingItemsMap.get(String(dbItem._id))
+					if (incomingItem) {
+						// Item exists in incoming data - merge it at its original position
+						const updatedItem = { ...dbItem, ...incomingItem }
+						fillMissingProperties(updatedItem, dbItem)
+						mergedArray.push(updatedItem)
+						incomingItemsMap.delete(String(dbItem._id)) // Mark as processed
+					} else {
+						// Item only in DB - keep it as is at its original position
+						mergedArray.push(dbItem)
+					}
 				})
 
-				// Add remaining items from the DB that are not in the incoming array
-				const remainingItems = targetTask[key].filter(
-					(dbItem) => !eachTask[key].some((item) => item._id === dbItem._id)
-				)
+				// Add any new items from incoming array that are not in DB (add at the end)
+				incomingItemsMap.forEach((item) => {
+					mergedArray.push(item)
+				})
 
-				eachTask[key] = [...updatedArray, ...remainingItems]
+				eachTask[key] = mergedArray
 			}
 		} else if (typeof targetTask[key] === 'object' && targetTask[key] !== null) {
 			// If the property is an object (excluding null), call the function recursively
