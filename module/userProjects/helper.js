@@ -1347,20 +1347,18 @@ module.exports = class UserProjectsHelper {
 					}
 					if (progressStats.projectStatus == 'completed') {
 						updatePayload.idpProjectCompletedAt = new Date()
-						updatePayload.status = 'COMPLETED'
+						// updatePayload.status = 'COMPLETED'
 					}
 				}
 
 				// 5. Execute Updates
 				if (updatePayload) {
-					// To prevent status from being updated in the entity
-					const { status, ...payloadWithoutStatus } = updatePayload
 					await programUsersService.updateEntity(
 						targetUserId,
 						targetProgramId,
 						isSelfCreated ? project.programExternalId || '' : '',
 						project.entityId,
-						payloadWithoutStatus,
+						updatePayload,
 						project.tenantId
 					)
 					// const entityStatus = updatePayload.status
