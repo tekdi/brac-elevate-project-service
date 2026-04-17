@@ -1333,7 +1333,7 @@ module.exports = class UserProjectsHelper {
 				if (entity.status === 'NOT_ONBOARDED' && entity.onBoardedProjectId?.toString() === projectStringId) {
 					updatePayload = {
 						onBoardingProgress: progressStats,
-						status: progressStats.projectStatus === 'completed' ? 'ONBOARDED' : 'NOT_ONBOARDED',
+						// status: progressStats.projectStatus === 'completed' ? 'ONBOARDED' : 'NOT_ONBOARDED',
 					}
 					if (progressStats.projectStatus === 'completed') {
 						updatePayload.onBoardingProjectCompletedAt = new Date()
@@ -1347,7 +1347,7 @@ module.exports = class UserProjectsHelper {
 					}
 					if (progressStats.projectStatus == 'completed') {
 						updatePayload.idpProjectCompletedAt = new Date()
-						updatePayload.status = 'COMPLETED'
+						// updatePayload.status = 'COMPLETED'
 					}
 				}
 
@@ -1361,14 +1361,14 @@ module.exports = class UserProjectsHelper {
 						updatePayload,
 						project.tenantId
 					)
-					const entityStatus = updatePayload.status
+					// const entityStatus = updatePayload.status
 					delete updatePayload.status
 					await programUsersService.createOrUpdate({
 						userId: entity.userId,
 						programId: targetProgramId,
 						tenantId: project.tenantId,
 						metaInformation: updatePayload,
-						status: entityStatus,
+						// status: entityStatus,
 					})
 
 					// Additional step for Scenario 2: Sync the assigned user's record
@@ -1379,7 +1379,7 @@ module.exports = class UserProjectsHelper {
 							programExternalId: project.programExternalId,
 							tenantId: project.tenantId,
 							metaInformation: updatePayload,
-							status: entityStatus,
+							// status: entityStatus,
 						})
 					}
 				}
