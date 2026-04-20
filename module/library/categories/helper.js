@@ -164,6 +164,40 @@ module.exports = class LibraryCategoriesHelper {
 	}
 
 	/**
+	 * For each category id, collect that id and every ancestor via parentId until root (no parent).
+	 * Use when the client selects a leaf/deep category but the project should include the full chain.
+	 * @param {Array<String>} categoryIds - One or more category ids (typically leaf ids from the request)
+	 * @param {String} tenantId - Tenant id
+	 * @returns {Promise<Array<String>>} Unique category ids as strings
+	 */
+	static async collectCategoryIdsWithAncestors(categoryIds, tenantId) {
+		const seedIds = [...new Set((categoryIds || []).map((id) => (id ? String(id).trim() : '')).filter(Boolean))]
+		const result = new Set()
+
+		for (const startId of seedIds) {
+			let currentId = startId
+			let depth = 0
+			while (currentId && depth < 100) {
+				result.add(currentId)
+				const docs = await projectCategoriesQueries.categoryDocuments(
+					{
+						_id: UTILS.convertStringToObjectId(currentId),
+						tenantId: tenantId,
+						isDeleted: false,
+					},
+					['parentId']
+				)
+				if (!docs || docs.length === 0 || !docs[0].parentId) {
+					break
+				}
+				currentId = docs[0].parentId.toString()
+				depth++
+			}
+		}
+		return Array.from(result)
+	}
+
+	/**
 	 * List of library projects.
 	 * @method
 	 * @name projects

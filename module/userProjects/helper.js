@@ -4785,14 +4785,28 @@ module.exports = class UserProjectsHelper {
 					}
 				}
 
-				// Collect all unique category IDs from templates
+				// categoryId per template row in the request — only these ids are kept when building project categories
+				const requestCategoryIds = templates
+					.map((t) =>
+						t && t.categoryId != null && String(t.categoryId).trim() !== ''
+							? String(t.categoryId).trim()
+							: null
+					)
+					.filter((id) => id !== null)
+
+				// Collect unique category IDs from templates; if request includes categoryIds, restrict to those only
 				let allCategoryIds = []
-				const categoryIdSet = new Set() // To avoid duplicates
+				const categoryIdSet = new Set()
+				const filterByRequest = requestCategoryIds.length > 0
+
 				validTemplates.forEach((template) => {
 					if (template.categories && Array.isArray(template.categories)) {
 						template.categories.forEach((category) => {
 							const categoryId = category._id?.toString() || category
-							if (categoryId && !categoryIdSet.has(categoryId)) {
+							if (filterByRequest && !requestCategoryIds.includes(categoryId)) {
+								return
+							}
+							if (!categoryIdSet.has(categoryId)) {
 								categoryIdSet.add(categoryId)
 								allCategoryIds.push(categoryId)
 							}
@@ -4800,12 +4814,23 @@ module.exports = class UserProjectsHelper {
 					}
 				})
 
+				// Selected categoryId may be a leaf (e.g. level 4): include parent, grand-parent, … up to root in allCategoryIds
+				if (requestCategoryIds.length > 0 && allCategoryIds.length > 0) {
+					allCategoryIds = await libraryCategoriesHelper.collectCategoryIdsWithAncestors(
+						allCategoryIds,
+						tenantId
+					)
+				}
+
 				// Fetch full category documents from projectCategories collection
 				let allCategories = []
 				if (allCategoryIds.length > 0) {
+					const categoryObjectIdsForQuery = allCategoryIds.map((id) =>
+						ObjectId.isValid(id) ? new ObjectId(id) : id
+					)
 					allCategories = await projectCategoriesQueries.categoryDocuments(
 						{
-							_id: { $in: allCategoryIds },
+							_id: { $in: categoryObjectIdsForQuery },
 							tenantId: tenantId,
 						},
 						['_id', 'name', 'externalId', 'evidences']
