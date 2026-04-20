@@ -380,34 +380,204 @@ module.exports = class UserProjectsHelper {
 					updateProject.tasks = await _projectTask(data.tasks, false, '', '', data.programId, userDetails)
 
 					if (userProject[0].tasks && userProject[0].tasks.length > 0) {
-						updateProject.tasks.forEach((task) => {
+						// Helper function to flatten nested children from request
+						const flattenNestedTasks = (taskList) => {
+							const flatList = []
+							for (let task of taskList) {
+								flatList.push(task)
+								// Recursively add nested children
+								if (task.children && Array.isArray(task.children) && task.children.length > 0) {
+									flatList.push(...flattenNestedTasks(task.children))
+								}
+							}
+							return flatList
+						}
+
+						// Flatten all tasks including nested children for processing
+						const allTasksToProcess = flattenNestedTasks(updateProject.tasks)
+
+						// Validate task completion before processing updates
+						// Check if any task is being set to "completed" and validate its children are completed
+						for (let task of allTasksToProcess) {
+							// Find the existing task in the database to get current status
+							const existingTaskIndex = userProject[0].tasks.findIndex(
+								(projectTask) => projectTask._id === task._id
+							)
+
+							// Also check in nested children
+							const findTaskInNested = (taskList, taskId) => {
+								for (let t of taskList) {
+									if (String(t._id) === String(taskId)) {
+										return t
+									}
+									if (t.children && Array.isArray(t.children)) {
+										const found = findTaskInNested(t.children, taskId)
+										if (found) return found
+									}
+								}
+								return null
+							}
+
+							const existingTask =
+								existingTaskIndex >= 0
+									? userProject[0].tasks[existingTaskIndex]
+									: findTaskInNested(userProject[0].tasks, task._id)
+
+							let previousStatus = null
+							if (existingTask) {
+								previousStatus = existingTask.status
+							}
+
+							// If status is being changed to "completed", validate children are completed
+							if (task.status === 'completed' && previousStatus !== 'completed') {
+								// Use current tasks from database for validation (before merge)
+								const validationResult = _validateTaskCompletion(userProject[0].tasks, task._id)
+								if (!validationResult.isValid) {
+									throw {
+										status: HTTP_STATUS_CODE.bad_request.status,
+										message: validationResult.message,
+									}
+								}
+							}
+						}
+
+						// Track which tasks were updated to "completed" for cascading status updates
+						const tasksUpdatedToCompleted = []
+
+						// Helper function to update task in parent's children array
+						const updateTaskInChildrenArray = (tasks, taskId, updatedTask) => {
+							for (let parentTask of tasks) {
+								if (parentTask.children && Array.isArray(parentTask.children)) {
+									const childIndex = parentTask.children.findIndex(
+										(child) => String(child._id) === String(taskId)
+									)
+									if (childIndex >= 0) {
+										// Update the child in parent's children array
+										parentTask.children[childIndex] = {
+											...parentTask.children[childIndex],
+											...updatedTask,
+										}
+									}
+									// Recursively check nested children
+									if (parentTask.children.length > 0) {
+										updateTaskInChildrenArray(parentTask.children, taskId, updatedTask)
+									}
+								}
+							}
+						}
+
+						// Process all tasks including nested children
+						allTasksToProcess.forEach((task) => {
 							task.updatedBy = userId
 							task.updatedAt = new Date()
 
+							// Helper to find task in nested structure and get previous status
+							const findTaskInNested = (taskList, taskId) => {
+								for (let i = 0; i < taskList.length; i++) {
+									if (String(taskList[i]._id) === String(taskId)) {
+										return { task: taskList[i], index: i, parentList: taskList }
+									}
+									// Recursively check children
+									if (taskList[i].children && Array.isArray(taskList[i].children)) {
+										const found = findTaskInNested(taskList[i].children, taskId)
+										if (found) return found
+									}
+								}
+								return null
+							}
+
+							// Find task in flat structure first
 							let taskIndex = userProject[0].tasks.findIndex(
 								(projectTask) => projectTask._id === task._id
 							)
 
-							if (taskIndex < 0) {
-								userProject[0].tasks.push(task)
-							} else {
-								let keepFieldsFromTask = ['observationInformation', 'submissions']
+							let existingTask = null
+							let previousStatus = null
+							let taskLocation = null // 'flat' or 'nested'
 
+							if (taskIndex >= 0) {
+								existingTask = userProject[0].tasks[taskIndex]
+								previousStatus = existingTask.status
+								taskLocation = 'flat'
+							} else {
+								// Check nested structure
+								const nestedResult = findTaskInNested(userProject[0].tasks, task._id)
+								if (nestedResult) {
+									existingTask = nestedResult.task
+									previousStatus = nestedResult.task.status
+									taskLocation = 'nested'
+									taskIndex = nestedResult.index
+								}
+							}
+
+							// Track if status changed to "completed"
+							if (previousStatus !== 'completed' && task.status === 'completed') {
+								tasksUpdatedToCompleted.push(task)
+							}
+
+							if (taskLocation === 'nested') {
+								// Update nested task
+								const nestedResult = findTaskInNested(userProject[0].tasks, task._id)
+								if (nestedResult) {
+									let keepFieldsFromTask = ['observationInformation', 'submissions']
+									removeFieldsFromRequest.forEach((removeField) => {
+										delete nestedResult.task[removeField]
+									})
+									keepFieldsFromTask.forEach((field) => {
+										if (nestedResult.task[field]) {
+											task[field] = nestedResult.task[field]
+										}
+									})
+									nestedResult.parentList[nestedResult.index] = {
+										...nestedResult.task,
+										...task,
+										updatedBy: userId,
+										updatedAt: new Date(),
+									}
+								}
+							} else if (taskIndex >= 0) {
+								// Update task in flat structure
+								let keepFieldsFromTask = ['observationInformation', 'submissions']
 								removeFieldsFromRequest.forEach((removeField) => {
 									delete userProject[0].tasks[taskIndex][removeField]
 								})
-
 								keepFieldsFromTask.forEach((field) => {
 									if (userProject[0].tasks[taskIndex][field]) {
 										task[field] = userProject[0].tasks[taskIndex][field]
 									}
 								})
-
 								userProject[0].tasks[taskIndex] = task
+							} else {
+								// New task - add to root
+								userProject[0].tasks.push(task)
 							}
+
+							// Always update the task in parent's children array if it exists (for both flat and nested)
+							updateTaskInChildrenArray(userProject[0].tasks, task._id, task)
 						})
 
 						updateProject.tasks = userProject[0].tasks
+
+						// Process cascading status updates ONLY when task status is updated to "completed"
+						if (tasksUpdatedToCompleted.length > 0) {
+							const cascadingResult = _processCascadingStatusUpdates(
+								updateProject.tasks,
+								tasksUpdatedToCompleted,
+								userId
+							)
+
+							// Update project status if all root-level tasks are completed
+							if (cascadingResult.projectStatusUpdate) {
+								updateProject.status = 'completed'
+								updateProject.completedDate = new Date()
+							}
+
+							// Sync all tasks in children arrays after cascading updates
+							// This ensures parent tasks updated by cascading are reflected in their parent's children arrays
+							updateProject.tasks.forEach((task) => {
+								updateTaskInChildrenArray(updateProject.tasks, task._id, task)
+							})
+						}
 					}
 
 					taskReport.total = updateProject.tasks.length
@@ -438,6 +608,22 @@ module.exports = class UserProjectsHelper {
 						}
 					}
 				})
+
+				// Validate project completion before setting status to "completed"
+				if (data.status === CONSTANTS.common.COMPLETED_STATUS) {
+					// Use current tasks from database for validation
+					const validationResult = _validateProjectCompletion(
+						updateProject.tasks && updateProject.tasks.length > 0
+							? updateProject.tasks
+							: userProject[0].tasks
+					)
+					if (!validationResult.isValid) {
+						throw {
+							status: HTTP_STATUS_CODE.bad_request.status,
+							message: validationResult.message,
+						}
+					}
+				}
 
 				updateProject.updatedBy = userId
 				updateProject.updatedAt = new Date()
@@ -6066,6 +6252,392 @@ function validateAllTasks(tasks) {
 			throw new Error(CONSTANTS.apiResponses.INVALID_TASK_STATUS)
 		}
 	}
+}
+
+/**
+ * Recursively find a task by _id in the nested task structure.
+ * @method
+ * @name _findTaskById
+ * @param {Array} tasks - Array of tasks to search in.
+ * @param {String} taskId - The _id of the task to find.
+ * @returns {Object|null} The found task object or null if not found.
+ */
+function _findTaskById(tasks, taskId) {
+	if (!tasks || !Array.isArray(tasks)) {
+		return null
+	}
+
+	for (let i = 0; i < tasks.length; i++) {
+		// Compare as strings to handle ObjectId vs string
+		if (String(tasks[i]._id) === String(taskId)) {
+			return tasks[i]
+		}
+		// Recursively search in children
+		if (tasks[i].children && tasks[i].children.length > 0) {
+			const found = _findTaskById(tasks[i].children, taskId)
+			if (found) {
+				return found
+			}
+		}
+	}
+	return null
+}
+
+/**
+ * Find the parent task of a given task by checking both parentId and children arrays.
+ * @method
+ * @name _findParentTask
+ * @param {Array} tasks - Array of all tasks (root level).
+ * @param {String} taskId - The _id of the child task.
+ * @returns {Object|null} The parent task object or null if not found.
+ */
+function _findParentTask(tasks, taskId) {
+	if (!tasks || !Array.isArray(tasks)) {
+		return null
+	}
+
+	// First, try to find the task and get its parentId
+	const task = _findTaskById(tasks, taskId)
+	if (!task) {
+		return null
+	}
+
+	// If task has parentId, find parent by parentId
+	if (task.parentId) {
+		const parent = _findTaskById(tasks, task.parentId)
+		if (parent) {
+			return parent
+		}
+	}
+
+	// If no parentId, search for parent by checking children arrays
+	const findParentInChildren = (taskList, childId) => {
+		for (let parentTask of taskList) {
+			// Check if this task has the child in its children array
+			if (parentTask.children && Array.isArray(parentTask.children)) {
+				const childFound = parentTask.children.find((child) => String(child._id) === String(childId))
+				if (childFound) {
+					return parentTask
+				}
+				// Recursively search in nested children
+				const found = findParentInChildren(parentTask.children, childId)
+				if (found) {
+					return found
+				}
+			}
+		}
+		return null
+	}
+
+	return findParentInChildren(tasks, taskId)
+}
+
+/**
+ * Get all sibling tasks (tasks with the same parent) from the task structure.
+ * Checks both parentId field and children arrays.
+ * @method
+ * @name _getSiblingTasks
+ * @param {Array} tasks - Array of all tasks (flat structure).
+ * @param {String} parentId - The parentId to search for (null for root-level tasks).
+ * @returns {Array} Array of sibling tasks.
+ */
+function _getSiblingTasks(tasks, parentId) {
+	if (!tasks || !Array.isArray(tasks)) {
+		return []
+	}
+
+	const siblings = []
+
+	// If parentId is null, get all root-level tasks
+	if (parentId === null || parentId === undefined) {
+		for (let task of tasks) {
+			// Root-level tasks don't have parentId or are not in any parent's children
+			const taskParentId = task.parentId || null
+			if (taskParentId === null && task.isDeleted !== true) {
+				siblings.push(task)
+			}
+		}
+		return siblings
+	}
+
+	// Find the parent task first
+	const parentTask = _findTaskById(tasks, parentId)
+	if (parentTask && parentTask.children && Array.isArray(parentTask.children)) {
+		// Get siblings from parent's children array
+		for (let child of parentTask.children) {
+			if (child.isDeleted !== true) {
+				siblings.push(child)
+			}
+		}
+	}
+
+	// Also check for tasks with parentId matching (to handle cases where parentId is set)
+	const flattenTasks = (taskList) => {
+		const flatList = []
+		for (let task of taskList) {
+			flatList.push(task)
+			if (task.children && task.children.length > 0) {
+				flatList.push(...flattenTasks(task.children))
+			}
+		}
+		return flatList
+	}
+
+	const allTasks = flattenTasks(tasks)
+
+	// Find all tasks with matching parentId (avoid duplicates)
+	for (let task of allTasks) {
+		const taskParentId = task.parentId || null
+		if (parentId !== null && String(taskParentId) === String(parentId)) {
+			// Only include non-deleted tasks and avoid duplicates
+			if (task.isDeleted !== true && !siblings.find((s) => String(s._id) === String(task._id))) {
+				siblings.push(task)
+			}
+		}
+	}
+
+	return siblings
+}
+
+/**
+ * Check if all sibling tasks (with same parentId) have status "completed".
+ * @method
+ * @name _areAllSiblingsCompleted
+ * @param {Array} tasks - Array of all tasks (root level).
+ * @param {String} parentId - The parentId to check (null for root-level tasks).
+ * @returns {Boolean} True if all siblings are completed, false otherwise.
+ */
+function _areAllSiblingsCompleted(tasks, parentId) {
+	const siblings = _getSiblingTasks(tasks, parentId)
+
+	if (siblings.length === 0) {
+		return false
+	}
+
+	// Check if all siblings have status "completed"
+	const allCompleted = siblings.every((sibling) => sibling.status === 'completed')
+
+	return allCompleted
+}
+
+/**
+ * Get all child tasks of a given task (tasks that have this task as their parent).
+ * Checks both parentId field and children array structure.
+ * @method
+ * @name _getChildTasks
+ * @param {Array} tasks - Array of all tasks (flat structure).
+ * @param {String} taskId - The _id of the parent task.
+ * @returns {Array} Array of child tasks.
+ */
+function _getChildTasks(tasks, taskId) {
+	if (!tasks || !Array.isArray(tasks)) {
+		return []
+	}
+
+	const children = []
+
+	// Find the parent task first
+	const parentTask = _findTaskById(tasks, taskId)
+	if (parentTask && parentTask.children && Array.isArray(parentTask.children)) {
+		// Get children from parent's children array
+		for (let child of parentTask.children) {
+			if (child.isDeleted !== true) {
+				children.push(child)
+			}
+		}
+	}
+
+	// Also check for tasks with parentId matching taskId
+	const flattenTasks = (taskList) => {
+		const flatList = []
+		for (let task of taskList) {
+			flatList.push(task)
+			// Also include children in the flat list
+			if (task.children && task.children.length > 0) {
+				flatList.push(...flattenTasks(task.children))
+			}
+		}
+		return flatList
+	}
+
+	const allTasks = flattenTasks(tasks)
+
+	// Find all tasks with matching parentId (avoid duplicates)
+	for (let task of allTasks) {
+		const taskParentId = task.parentId || null
+		// Match parentId (handle null and string comparisons)
+		if (taskId !== null && String(taskParentId) === String(taskId)) {
+			// Only include non-deleted tasks and avoid duplicates
+			if (task.isDeleted !== true && !children.find((c) => String(c._id) === String(task._id))) {
+				children.push(task)
+			}
+		}
+	}
+
+	return children
+}
+
+/**
+ * Validate if a task can be set to "completed" status.
+ * A task can only be completed if all its children are completed.
+ * @method
+ * @name _validateTaskCompletion
+ * @param {Array} tasks - Array of all tasks (root level).
+ * @param {String} taskId - The _id of the task to validate.
+ * @returns {Object} Object with isValid flag and error message if invalid.
+ */
+function _validateTaskCompletion(tasks, taskId) {
+	const children = _getChildTasks(tasks, taskId)
+
+	if (children.length === 0) {
+		// No children, validation passes
+		return { isValid: true }
+	}
+
+	// Check if all children are completed
+	const allChildrenCompleted = children.every((child) => child.status === 'completed')
+
+	if (!allChildrenCompleted) {
+		const incompleteChildren = children.filter((child) => child.status !== 'completed')
+		return {
+			isValid: false,
+			message: `Cannot mark task as completed. ${incompleteChildren.length} child task(s) are not completed.`,
+		}
+	}
+
+	return { isValid: true }
+}
+
+/**
+ * Validate if project can be set to "completed" status.
+ * A project can only be completed if all root-level tasks are completed.
+ * @method
+ * @name _validateProjectCompletion
+ * @param {Array} tasks - Array of all tasks (root level).
+ * @returns {Object} Object with isValid flag and error message if invalid.
+ */
+function _validateProjectCompletion(tasks) {
+	if (!tasks || !Array.isArray(tasks) || tasks.length === 0) {
+		// No tasks, validation passes
+		return { isValid: true }
+	}
+
+	// Get all root-level tasks (tasks with no parentId)
+	const rootTasks = _getSiblingTasks(tasks, null)
+
+	if (rootTasks.length === 0) {
+		// No root tasks, validation passes
+		return { isValid: true }
+	}
+
+	// Check if all root-level tasks are completed
+	const allRootTasksCompleted = rootTasks.every((task) => task.status === 'completed')
+
+	if (!allRootTasksCompleted) {
+		const incompleteRootTasks = rootTasks.filter((task) => task.status !== 'completed')
+		return {
+			isValid: false,
+			message: `Cannot mark project as completed. ${incompleteRootTasks.length} root-level task(s) are not completed.`,
+		}
+	}
+
+	return { isValid: true }
+}
+
+/**
+ * Recursively update parent task status to "completed" if all siblings are completed.
+ * This function cascades up the hierarchy until a level is found where not all siblings are completed.
+ * Handles both parentId field and children array structure.
+ * @method
+ * @name _updateParentStatusRecursively
+ * @param {Array} tasks - Array of all tasks (root level).
+ * @param {String} taskId - The _id of the task whose parent should be checked.
+ * @param {String} userId - User ID for tracking who made the update.
+ * @returns {Object} Object with updated flag and projectStatusUpdate flag.
+ */
+function _updateParentStatusRecursively(tasks, taskId, userId) {
+	const result = {
+		updated: false,
+		projectStatusUpdate: false,
+	}
+
+	// Find the task to get its parent information
+	const task = _findTaskById(tasks, taskId)
+	if (!task) {
+		return result
+	}
+
+	// Find parent task (checks both parentId and children arrays)
+	const parentTask = _findParentTask(tasks, taskId)
+
+	// If no parent found, this is a root-level task
+	if (!parentTask) {
+		// Check if all root-level tasks are completed
+		if (_areAllSiblingsCompleted(tasks, null)) {
+			result.projectStatusUpdate = true
+			result.updated = true
+		}
+		return result
+	}
+
+	// Get parentId for sibling checking (use parentTask._id)
+	const parentId = parentTask._id
+
+	// Check if all siblings with this parentId are completed
+	if (!_areAllSiblingsCompleted(tasks, parentId)) {
+		// Not all siblings are completed, stop cascading
+		return result
+	}
+
+	// All siblings are completed, update the parent task status
+	if (parentTask.status !== 'completed') {
+		parentTask.status = 'completed'
+		parentTask.updatedBy = userId
+		parentTask.updatedAt = new Date()
+		result.updated = true
+	}
+
+	// Recursively check parent's parent
+	const parentResult = _updateParentStatusRecursively(tasks, parentTask._id, userId)
+	result.updated = result.updated || parentResult.updated
+	result.projectStatusUpdate = parentResult.projectStatusUpdate
+
+	return result
+}
+
+/**
+ * Process cascading status updates for tasks that were updated to "completed".
+ * @method
+ * @name _processCascadingStatusUpdates
+ * @param {Array} tasks - Array of all tasks (root level).
+ * @param {Array} updatedTasks - Array of tasks that were updated in the current request.
+ * @param {String} userId - User ID for tracking who made the update.
+ * @returns {Object} Object with projectStatusUpdate flag indicating if project status should be updated.
+ */
+function _processCascadingStatusUpdates(tasks, updatedTasks, userId) {
+	let projectStatusUpdate = false
+
+	// Process each updated task
+	updatedTasks.forEach((updatedTask) => {
+		// Only process tasks that were updated to "completed"
+		if (updatedTask.status === 'completed') {
+			// Find the task in the full task structure
+			const taskInStructure = _findTaskById(tasks, updatedTask._id)
+			if (!taskInStructure) {
+				return
+			}
+
+			// Check if all siblings are completed and update parent recursively
+			// Pass taskId instead of parentId - function will find parent internally
+			const updateResult = _updateParentStatusRecursively(tasks, updatedTask._id, userId)
+
+			if (updateResult.projectStatusUpdate) {
+				projectStatusUpdate = true
+			}
+		}
+	})
+
+	return { projectStatusUpdate }
 }
 
 /**
