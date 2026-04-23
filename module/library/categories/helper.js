@@ -164,7 +164,7 @@ module.exports = class LibraryCategoriesHelper {
 	}
 
 	/**
-	 * For each category id, collect that id and every ancestor via parentId until root (no parent).
+	 * For each category id, collect that id and every ancestor by following parentId until parentId is null (root).
 	 * Use when the client selects a leaf/deep category but the project should include the full chain.
 	 * @param {Array<String>} categoryIds - One or more category ids (typically leaf ids from the request)
 	 * @param {String} tenantId - Tenant id
@@ -176,22 +176,28 @@ module.exports = class LibraryCategoriesHelper {
 
 		for (const startId of seedIds) {
 			let currentId = startId
-			let depth = 0
-			while (currentId && depth < 100) {
-				result.add(currentId)
+			const visited = new Set()
+			// Walk from leaf to root until parentId is null. If we see the same id again, stop (cyclic parent chain in DB).
+			while (currentId != null && String(currentId).trim() !== '') {
+				const idKey = String(currentId).trim()
+				if (visited.has(idKey)) {
+					break
+				}
+				visited.add(idKey)
+				result.add(idKey)
 				const docs = await projectCategoriesQueries.categoryDocuments(
 					{
-						_id: UTILS.convertStringToObjectId(currentId),
+						_id: UTILS.convertStringToObjectId(idKey),
 						tenantId: tenantId,
 						isDeleted: false,
 					},
 					['parentId']
 				)
-				if (!docs || docs.length === 0 || !docs[0].parentId) {
+				const parentId = docs && docs[0] ? docs[0].parentId : null
+				if (parentId == null) {
 					break
 				}
-				currentId = docs[0].parentId.toString()
-				depth++
+				currentId = parentId.toString()
 			}
 		}
 		return Array.from(result)
