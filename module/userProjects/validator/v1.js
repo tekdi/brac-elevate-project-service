@@ -147,6 +147,13 @@ module.exports = (req) => {
 						if (!template.templateId) {
 							throw new Error('Each template must have a templateId')
 						}
+						if (
+							template.categoryId === undefined ||
+							template.categoryId === null ||
+							String(template.categoryId).trim() === ''
+						) {
+							throw new Error(`Each template must have a categoryId (templateId: ${template.templateId})`)
+						}
 						return true
 					})
 				})
