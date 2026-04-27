@@ -4785,27 +4785,78 @@ module.exports = class UserProjectsHelper {
 					}
 				}
 
-				// Collect all unique category IDs from templates
-				let allCategoryIds = []
-				const categoryIdSet = new Set() // To avoid duplicates
-				validTemplates.forEach((template) => {
-					if (template.categories && Array.isArray(template.categories)) {
-						template.categories.forEach((category) => {
-							const categoryId = category._id?.toString() || category
-							if (categoryId && !categoryIdSet.has(categoryId)) {
-								categoryIdSet.add(categoryId)
-								allCategoryIds.push(categoryId)
+				// Per request row: templateId + categoryId — categoryId must exist on that template only (no cross-template matching)
+				const validatedCategoryIdsUnique = new Set()
+
+				for (const tpl of templates) {
+					if (!tpl || !tpl.templateId) {
+						throw {
+							status: HTTP_STATUS_CODE.bad_request.status,
+							message: 'Each template entry must include templateId',
+						}
+					}
+					if (tpl.categoryId == null || String(tpl.categoryId).trim() === '') {
+						throw {
+							status: HTTP_STATUS_CODE.bad_request.status,
+							message: `categoryId is required for template ${tpl.templateId}`,
+						}
+					}
+
+					const requestedCategoryId = String(tpl.categoryId).trim()
+					if (!UTILS.isValidMongoId(requestedCategoryId)) {
+						throw {
+							status: HTTP_STATUS_CODE.bad_request.status,
+							message: `Invalid categoryId for template ${tpl.templateId}`,
+						}
+					}
+
+					const templateData = validTemplates.find(
+						(t) => t && t._id && t._id.toString() === tpl.templateId.toString()
+					)
+					if (!templateData) {
+						throw {
+							status: HTTP_STATUS_CODE.bad_request.status,
+							message: CONSTANTS.apiResponses.PROJECT_TEMPLATE_NOT_FOUND,
+						}
+					}
+
+					const allowedOnThisTemplate = new Set()
+					if (templateData.categories && Array.isArray(templateData.categories)) {
+						templateData.categories.forEach((category) => {
+							const cid = category._id ? category._id.toString() : String(category)
+							if (cid) {
+								allowedOnThisTemplate.add(cid)
 							}
 						})
 					}
-				})
+
+					if (!allowedOnThisTemplate.has(requestedCategoryId)) {
+						throw {
+							status: HTTP_STATUS_CODE.bad_request.status,
+							message: `categoryId ${requestedCategoryId} is not linked to template ${tpl.templateId}`,
+						}
+					}
+
+					validatedCategoryIdsUnique.add(requestedCategoryId)
+				}
+
+				const requestCategoryIds = Array.from(validatedCategoryIdsUnique)
+
+				// Leaf categories from request (unique), then add ancestor chain to root
+				let allCategoryIds =
+					requestCategoryIds.length > 0
+						? await libraryCategoriesHelper.collectCategoryIdsWithAncestors(requestCategoryIds, tenantId)
+						: []
 
 				// Fetch full category documents from projectCategories collection
 				let allCategories = []
 				if (allCategoryIds.length > 0) {
+					const categoryObjectIdsForQuery = allCategoryIds.map((id) =>
+						ObjectId.isValid(id) ? new ObjectId(id) : id
+					)
 					allCategories = await projectCategoriesQueries.categoryDocuments(
 						{
-							_id: { $in: allCategoryIds },
+							_id: { $in: categoryObjectIdsForQuery },
 							tenantId: tenantId,
 						},
 						['_id', 'name', 'externalId', 'evidences']
