@@ -6128,15 +6128,27 @@ function validateAllTasks(tasks) {
  * @returns {Array} Updated tasks with missing information filled.
  */
 function _fillMissingTaskInformation(tasks, tasksFromDB) {
-	// Main loop to go through all tasks and fill missing properties
-	for (let eachTask of tasks) {
-		let targetTask = tasksFromDB.find((singleTask) => singleTask._id == eachTask._id)
-		if (targetTask) {
-			fillMissingProperties(eachTask, targetTask)
+	const incomingTaskMap = new Map(tasks.map((task) => [String(task._id), task]))
+	const mergedTasks = []
+
+	// Preserve original DB order for existing tasks while applying updates.
+	for (const dbTask of tasksFromDB) {
+		const incomingTask = incomingTaskMap.get(String(dbTask._id))
+		if (incomingTask) {
+			fillMissingProperties(incomingTask, dbTask)
+			mergedTasks.push(incomingTask)
+			incomingTaskMap.delete(String(dbTask._id))
+		} else {
+			mergedTasks.push(dbTask)
 		}
 	}
 
-	return tasks
+	// Append any newly added tasks that do not exist in DB.
+	for (const incomingTask of incomingTaskMap.values()) {
+		mergedTasks.push(incomingTask)
+	}
+
+	return mergedTasks
 }
 
 /**
@@ -6153,31 +6165,33 @@ function fillMissingProperties(eachTask, targetTask) {
 				// If the array is missing or empty, copy the entire array from the targetTask
 				eachTask[key] = [...targetTask[key]]
 			} else {
-				// Merge the two arrays while preserving original order from DB
-				const mergedArray = []
-				const incomingItemsMap = new Map(eachTask[key].map((item) => [String(item._id), item]))
+				const updatedArray = []
+				const incomingItemMap = new Map(eachTask[key].map((item) => [String(item._id), item]))
+				const processedIds = new Set()
 
-				// First, iterate through DB array to maintain original order
-				targetTask[key].forEach((dbItem) => {
-					const incomingItem = incomingItemsMap.get(String(dbItem._id))
+				for (const dbItem of targetTask[key]) {
+					const incomingItem = incomingItemMap.get(String(dbItem._id))
 					if (incomingItem) {
-						// Item exists in incoming data - merge it at its original position
 						const updatedItem = { ...dbItem, ...incomingItem }
 						fillMissingProperties(updatedItem, dbItem)
-						mergedArray.push(updatedItem)
-						incomingItemsMap.delete(String(dbItem._id)) // Mark as processed
+						updatedArray.push(updatedItem)
+						processedIds.add(String(dbItem._id))
 					} else {
-						// Item only in DB - keep it as is at its original position
-						mergedArray.push(dbItem)
+						updatedArray.push(dbItem)
 					}
-				})
+				}
 
-				// Add any new items from incoming array that are not in DB (add at the end)
-				incomingItemsMap.forEach((item) => {
-					mergedArray.push(item)
-				})
+				for (const item of eachTask[key]) {
+					if (!processedIds.has(String(item._id))) {
+						const targetItem =
+							targetTask[key].find((dbItem) => String(dbItem._id) === String(item._id)) || {}
+						const updatedItem = { ...targetItem, ...item }
+						fillMissingProperties(updatedItem, targetItem)
+						updatedArray.push(updatedItem)
+					}
+				}
 
-				eachTask[key] = mergedArray
+				eachTask[key] = updatedArray
 			}
 		} else if (typeof targetTask[key] === 'object' && targetTask[key] !== null) {
 			// If the property is an object (excluding null), call the function recursively
