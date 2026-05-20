@@ -1,4 +1,4 @@
-name: Tag Build & Deploy Project Service (BRAC)
+name: Tag Based Build and Push Project Service (BRAC)
 
 on:
   push:
