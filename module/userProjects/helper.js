@@ -1564,7 +1564,10 @@ module.exports = class UserProjectsHelper {
 							assignedAssessmentOrObservation.data
 						)
 
-						if (!currentTask?.solutionDetails?.isReusable) {
+						if (
+							currentTask?.solutionDetails?.isReusable === CONSTANTS.common.BOOLEAN_FALSE ||
+							currentTask?.projectTemplateDetails?.isReusable === CONSTANTS.common.FALSE
+						) {
 							assessmentOrObservationData['programId'] = project[0].programInformation._id
 						}
 
@@ -4539,6 +4542,7 @@ module.exports = class UserProjectsHelper {
 						message: CONSTANTS.apiResponses.USER_PROJECT_NOT_FOUND,
 					}
 				}
+
 				if (updateData.tasks && updateData.tasks.length > 0) {
 					updateData.tasks = _fillMissingTaskInformation(updateData.tasks, userProject[0].tasks)
 
@@ -5447,7 +5451,7 @@ module.exports = class UserProjectsHelper {
 						_id: solutionId,
 						externalId: solutionExternalId,
 						type: projectData?.projectTemplateDetails.type,
-						isReusable: CONSTANTS.common.FALSE,
+						isReusable: CONSTANTS.common.BOOLEAN_FALSE,
 						minNoOfSubmissionsRequired: projectData?.projectTemplateDetails.minNoOfSubmissionsRequired
 							? projectData?.projectTemplateDetails.minNoOfSubmissionsRequired
 							: CONSTANTS.common.DEFAULT_SUBMISSION_REQUIRED,
@@ -5966,7 +5970,10 @@ async function _projectTask(
 			}
 			let importSolutionsResponse
 			// create a child solution if solutionDetails has isReusable true solution details
-			if (singleTask?.solutionDetails?.isReusable) {
+			if (
+				singleTask?.solutionDetails?.isReusable === CONSTANTS.common.BOOLEAN_TRUE ||
+				singleTask?.solutionDetails?.isReusable === CONSTANTS.common.TRUE
+			) {
 				let programInformation = await programQueries.programsDocument({
 					_id: programId,
 					tenantId: userDetails.userInformation.tenantId,
@@ -6011,7 +6018,7 @@ async function _projectTask(
 					// Assinging the new solution  values to task solutionDetails
 					singleTask.solutionDetails._id = importSolutionsResponse.result._id
 					singleTask.solutionDetails.externalId = importSolutionsResponse.result.externalId
-					singleTask.solutionDetails.isReusable = CONSTANTS.common.FALSE
+					singleTask.solutionDetails.isReusable = CONSTANTS.common.BOOLEAN_FALSE
 
 					//updating programComponents
 					await programsQueries.findAndUpdate(
@@ -6052,7 +6059,7 @@ async function _projectTask(
 					}
 					singleTask.solutionDetails._id = importSolutionsResponse.result.solutionId
 					singleTask.solutionDetails.externalId = importSolutionsResponse.result.solutionExternalId
-					singleTask.solutionDetails.isReusable = CONSTANTS.common.FALSE
+					singleTask.solutionDetails.isReusable = CONSTANTS.common.BOOLEAN_FALSE
 					//updating programComponents
 					await programsQueries.findAndUpdate(
 						{
@@ -6128,29 +6135,15 @@ function validateAllTasks(tasks) {
  * @returns {Array} Updated tasks with missing information filled.
  */
 function _fillMissingTaskInformation(tasks, tasksFromDB) {
-	const incomingTaskMap = new Map(tasks.map((task) => [String(task._id), task]))
-
-	const mergedTasks = []
-
-	// Preserve DB order only for tasks that exist in incoming tasks
-	for (const dbTask of tasksFromDB) {
-		const taskId = String(dbTask._id)
-		const incomingTask = incomingTaskMap.get(taskId)
-
-		if (incomingTask) {
-			fillMissingProperties(incomingTask, dbTask)
-
-			mergedTasks.push(incomingTask)
-
-			// Remove processed task
-			incomingTaskMap.delete(taskId)
+	// Main loop to go through all tasks and fill missing properties
+	for (let eachTask of tasks) {
+		let targetTask = tasksFromDB.find((singleTask) => singleTask._id == eachTask._id)
+		if (targetTask) {
+			fillMissingProperties(eachTask, targetTask)
 		}
 	}
 
-	// Append newly added tasks
-	mergedTasks.push(...incomingTaskMap.values())
-
-	return mergedTasks
+	return tasks
 }
 
 /**
@@ -6167,33 +6160,23 @@ function fillMissingProperties(eachTask, targetTask) {
 				// If the array is missing or empty, copy the entire array from the targetTask
 				eachTask[key] = [...targetTask[key]]
 			} else {
+				// Merge the two arrays: existing data from DB and incoming updates
 				const updatedArray = []
-				const incomingItemMap = new Map(eachTask[key].map((item) => [String(item._id), item]))
-				const processedIds = new Set()
 
-				for (const dbItem of targetTask[key]) {
-					const incomingItem = incomingItemMap.get(String(dbItem._id))
-					if (incomingItem) {
-						const updatedItem = { ...dbItem, ...incomingItem }
-						fillMissingProperties(updatedItem, dbItem)
-						updatedArray.push(updatedItem)
-						processedIds.add(String(dbItem._id))
-					} else {
-						updatedArray.push(dbItem)
-					}
-				}
+				// Map over the incoming array (eachTask[key]) to fill missing properties
+				eachTask[key].forEach((item) => {
+					const targetItem = targetTask[key].find((dbItem) => dbItem._id === item._id) || {}
+					const updatedItem = { ...targetItem, ...item } // Merge incoming and existing data
+					fillMissingProperties(updatedItem, targetItem)
+					updatedArray.push(updatedItem)
+				})
 
-				for (const item of eachTask[key]) {
-					if (!processedIds.has(String(item._id))) {
-						const targetItem =
-							targetTask[key].find((dbItem) => String(dbItem._id) === String(item._id)) || {}
-						const updatedItem = { ...targetItem, ...item }
-						fillMissingProperties(updatedItem, targetItem)
-						updatedArray.push(updatedItem)
-					}
-				}
+				// Add remaining items from the DB that are not in the incoming array
+				const remainingItems = targetTask[key].filter(
+					(dbItem) => !eachTask[key].some((item) => item._id === dbItem._id)
+				)
 
-				eachTask[key] = updatedArray
+				eachTask[key] = [...updatedArray, ...remainingItems]
 			}
 		} else if (typeof targetTask[key] === 'object' && targetTask[key] !== null) {
 			// If the property is an object (excluding null), call the function recursively
@@ -6217,6 +6200,7 @@ function fillMissingProperties(eachTask, targetTask) {
 		}
 	}
 }
+
 /**
  * Project categories information.
  * @method
@@ -6397,7 +6381,10 @@ function _assessmentDetails(assessmentData) {
 				}
 			}
 
-			if (assessmentData.solutionDetails.isReusable) {
+			if (
+				assessmentData.solutionDetails.isReusable === CONSTANTS.common.BOOLEAN_TRUE ||
+				assessmentData.solutionDetails.isReusable === CONSTANTS.common.TRUE
+			) {
 				let createdAssessment = await surveyService.createAssessmentSolutionFromTemplate(
 					assessmentData.token,
 					assessmentData.solutionDetails._id,
