@@ -6129,24 +6129,26 @@ function validateAllTasks(tasks) {
  */
 function _fillMissingTaskInformation(tasks, tasksFromDB) {
 	const incomingTaskMap = new Map(tasks.map((task) => [String(task._id), task]))
+
 	const mergedTasks = []
 
-	// Preserve original DB order for existing tasks while applying updates.
+	// Preserve DB order only for tasks that exist in incoming tasks
 	for (const dbTask of tasksFromDB) {
-		const incomingTask = incomingTaskMap.get(String(dbTask._id))
+		const taskId = String(dbTask._id)
+		const incomingTask = incomingTaskMap.get(taskId)
+
 		if (incomingTask) {
 			fillMissingProperties(incomingTask, dbTask)
+
 			mergedTasks.push(incomingTask)
-			incomingTaskMap.delete(String(dbTask._id))
-		} else {
-			mergedTasks.push(dbTask)
+
+			// Remove processed task
+			incomingTaskMap.delete(taskId)
 		}
 	}
 
-	// Append any newly added tasks that do not exist in DB.
-	for (const incomingTask of incomingTaskMap.values()) {
-		mergedTasks.push(incomingTask)
-	}
+	// Append newly added tasks
+	mergedTasks.push(...incomingTaskMap.values())
 
 	return mergedTasks
 }
