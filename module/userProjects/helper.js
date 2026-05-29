@@ -36,6 +36,7 @@ const path = require('path')
 const gotenbergService = require(SERVICES_BASE_PATH + '/gotenberg')
 const projectService = require(SERVICES_BASE_PATH + '/projects')
 const defaultUserProfileConfig = require('@config/defaultUserProfileDeleteConfig')
+const { body } = require('express-validator/check')
 const configFilePath = process.env.AUTH_CONFIG_FILE_PATH
 const surveyService = require(SERVICES_BASE_PATH + '/survey')
 const programUsersService = require(SERVICES_BASE_PATH + '/programUsers')
@@ -1149,7 +1150,188 @@ module.exports = class UserProjectsHelper {
 	 * @returns {Object}
 	 */
 
-	static pushSubmissionToTask(projectId, taskId, updatedData) {
+	static pushSubmissionUpdateToListeners(updatedData = {}, userDetails = {}, listenerFieldMap = []) {
+		return new Promise(async (resolve, reject) => {
+			try {
+				const listenerApis = process.env.SUBMISSION_PUSH_LISTENER_API || ''
+
+				const urls = listenerApis
+					.split(',')
+					.map((url) => url.trim())
+					.filter((url) => url)
+
+				if (!urls.length) {
+					return resolve({ success: true, message: 'No submission push listener API configured' })
+				}
+
+				const userId =
+					updatedData.userId ||
+					updatedData.submittedBy ||
+					updatedData.createdBy ||
+					updatedData.entityId ||
+					updatedData.entityExternalId ||
+					''
+
+				const headers = {
+					'Content-Type': 'application/json',
+					internal_access_token: process.env.INTERNAL_ACCESS_TOKEN,
+				}
+
+				if (userDetails.userToken) {
+					headers['x-auth-token'] = userDetails.userToken
+				}
+
+				if (headers.internal_access_token && headers['x-auth-token']) {
+					delete headers['x-auth-token']
+				}
+
+				const tenantIdHeader = userDetails.tenantData || userDetails.userInformation?.tenantId || ''
+				if (tenantIdHeader) {
+					headers.tenantId = tenantIdHeader
+				}
+
+				const parseListenerFieldMap = () => {
+					const directListenerFieldMap = [
+						{ externalId: 'Q6_4766403683020', key: 'name' },
+						{ externalId: 'Q7_4766403683020', key: 'national_id' },
+						{ externalId: 'Q5_1_4766403683020', key: 'location' },
+						{ externalId: 'Q8_1_4766403683020', key: 'phone_code' },
+						{ externalId: 'Q9_4766403683020', key: 'phone' },
+						// { externalId: 'Q8_4766403683020', key: 'gender' },
+					]
+
+					if (Array.isArray(updatedData.listenerFieldMap) && updatedData.listenerFieldMap.length > 0) {
+						return updatedData.listenerFieldMap
+					}
+
+					if (Array.isArray(listenerFieldMap) && listenerFieldMap.length > 0) {
+						return listenerFieldMap
+					}
+
+					if (directListenerFieldMap.length > 0) {
+						return directListenerFieldMap
+					}
+
+					if (!process.env.SUBMISSION_PUSH_LISTENER_FIELD_MAP) {
+						return []
+					}
+
+					try {
+						const parsed = JSON.parse(process.env.SUBMISSION_PUSH_LISTENER_FIELD_MAP)
+						return Array.isArray(parsed) ? parsed : []
+					} catch (error) {
+						console.error('Invalid SUBMISSION_PUSH_LISTENER_FIELD_MAP:', error.message)
+						return []
+					}
+				}
+
+				const buildFieldValue = (answer) => {
+					if (answer === undefined || answer === null) {
+						return undefined
+					}
+					if (answer.value !== undefined) return answer.value
+					if (answer.payload !== undefined) return answer.payload
+					if (answer.answers !== undefined) return answer.answers
+					return answer
+				}
+
+				const listenerFieldMapData = parseListenerFieldMap()
+				const answers = updatedData.answers || {}
+
+				console.log('Parsed listener field map data:', listenerFieldMapData)
+				console.log('Answers data for mapping:', answers)
+				const answersArray = Array.isArray(answers) ? answers : Object.values(answers)
+				const answerByExternalId = answersArray.reduce((map, answer) => {
+					if (answer && answer.externalId) {
+						map[answer.externalId] = answer
+					}
+					return map
+				}, {})
+
+				const bodyData = listenerFieldMapData.length
+					? listenerFieldMapData.reduce((payload, field) => {
+							const externalId = field.externalId || field.external_id
+							const key = field.key || field.name || field.field
+							let answer = answerByExternalId[externalId]
+
+							if (!answer && externalId) {
+								answer = answersArray.find(
+									(answerRecord) =>
+										answerRecord &&
+										answerRecord.externalId &&
+										answerRecord.externalId.startsWith(externalId)
+								)
+							}
+
+							const value = buildFieldValue(answer)
+
+							if (key && value !== undefined) {
+								payload[key] = value
+							}
+							return payload
+					  }, {})
+					: updatedData.answers
+					? { answers: updatedData.answers }
+					: { ...updatedData }
+
+				console.log(`Prepared body for submission push listener API:`, bodyData)
+				if (bodyData.phone_code == 'R189') {
+					bodyData.phone_code = '27'
+				} else {
+					delete bodyData.phone_code
+				}
+
+				const results = await Promise.allSettled(
+					urls.map(async (url) => {
+						const resolvedUrl = url.includes('{userId}')
+							? userId
+								? url.replace('{userId}', encodeURIComponent(userId))
+								: null
+							: url
+
+						if (!resolvedUrl) {
+							throw new Error('Missing userId for listener URL')
+						}
+
+						console.log(`Calling submission push listener API: ${resolvedUrl} with data:`, bodyData)
+
+						const response = await axios.post(resolvedUrl, bodyData, {
+							headers,
+							timeout: CONSTANTS.common.SERVER_TIME_OUT,
+						})
+						return {
+							url: resolvedUrl,
+							status: response.status,
+							data: response.data,
+						}
+					})
+				)
+
+				const failures = results.filter(
+					(result) =>
+						result.status === 'rejected' || (result.status === 'fulfilled' && result.value?.status >= 400)
+				)
+
+				if (failures.length > 0) {
+					console.error('Submission push listener API failures', failures)
+				}
+
+				return resolve({
+					success: failures.length === 0,
+					message: failures.length === 0 ? 'Listener calls completed' : 'Some listener calls failed',
+					results,
+				})
+			} catch (error) {
+				console.error('pushSubmissionUpdateToListeners failed', error)
+				return resolve({
+					success: false,
+					message: error.message || 'Submission push listener call failed',
+				})
+			}
+		})
+	}
+
+	static pushSubmissionToTask(projectId, taskId, updatedData, userDetails = {}) {
 		return new Promise(async (resolve, reject) => {
 			try {
 				let updateSubmission = []
@@ -1161,7 +1343,7 @@ module.exports = class UserProjectsHelper {
 						_id: projectId,
 						'tasks._id': taskId,
 					},
-					['tasks']
+					['tasks', 'entityInformation']
 				)
 
 				if (!projectDocument.length > 0) {
@@ -1227,6 +1409,12 @@ module.exports = class UserProjectsHelper {
 							$set: updateFields,
 						}
 					)
+
+					if (process.env.SUBMISSION_PUSH_LISTENER_API) {
+						updatedData.userId = projectDocument[0].entityInformation.externalId
+						updatedData.entityId = projectDocument[0].entityInformation._id
+						await this.pushSubmissionUpdateToListeners(updatedData, userDetails)
+					}
 				} else {
 					const updateFields = {
 						'tasks.$[task].children.$[child].submissions': updateSubmission,
