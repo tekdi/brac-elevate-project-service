@@ -132,6 +132,43 @@ module.exports = (req) => {
 			}
 			req.checkQuery(existId).exists().withMessage('required solution or projectId Id')
 		},
+		updateProjectPlan: function () {
+			req.checkParams('_id')
+				.exists()
+				.withMessage('projectId is required in path params')
+				.isMongoId()
+				.withMessage('projectId must be a valid MongoDB ObjectId')
+
+			req.checkBody('replacements')
+				.exists()
+				.withMessage('replacements array is required')
+				.isArray()
+				.withMessage('replacements must be an array')
+				.custom((replacements) => {
+					if (!replacements || replacements.length === 0) {
+						throw new Error('replacements array cannot be empty')
+					}
+					return replacements.every((r) => {
+						if (!r.existingTemplateId) throw new Error('Each replacement must have existingTemplateId')
+						if (!r.existingCategoryId) throw new Error('Each replacement must have existingCategoryId')
+						if (!r.newTemplateId) throw new Error('Each replacement must have newTemplateId')
+						if (!r.newCategoryId) throw new Error('Each replacement must have newCategoryId')
+						return true
+					})
+				})
+
+			// replacementReason is optional — accepted as blank or absent
+
+			req.checkBody('categoryExternalIds')
+				.exists()
+				.withMessage('categoryExternalIds array is required')
+				.isArray()
+				.withMessage('categoryExternalIds must be an array')
+				.custom((ids) => {
+					if (!ids || ids.length === 0) throw new Error('categoryExternalIds cannot be empty')
+					return true
+				})
+		},
 		createProjectPlan: function () {
 			// Validate templates array
 			req.checkBody('templates')
