@@ -5481,6 +5481,31 @@ module.exports = class UserProjectsHelper {
 					(project.categories || []).filter((c) => c._id).map((c) => c._id.toString())
 				)
 
+				// Resolve the full updated category list from categoryExternalIds ONCE before the loop.
+				// categoryExternalIds is request-level (same for all replacements), so computing it
+				// inside the loop would trigger redundant DB round-trips.
+				if (categoryExternalIds && categoryExternalIds.length > 0) {
+					const leafCategoryDocs = await projectCategoriesQueries.categoryDocuments(
+						{ externalId: { $in: categoryExternalIds }, tenantId: tenantId },
+						['_id', 'name', 'externalId', 'evidences']
+					)
+					const leafIds = leafCategoryDocs.map((c) => c._id.toString())
+					const allCategoryIds =
+						leafIds.length > 0
+							? await libraryCategoriesHelper.collectCategoryIdsWithAncestors(leafIds, tenantId)
+							: []
+
+					if (allCategoryIds.length > 0) {
+						const categoryObjectIds = allCategoryIds.map((id) =>
+							ObjectId.isValid(id) ? new ObjectId(id) : id
+						)
+						updatedCategories = await projectCategoriesQueries.categoryDocuments(
+							{ _id: { $in: categoryObjectIds }, tenantId: tenantId },
+							['_id', 'name', 'externalId', 'evidences']
+						)
+					}
+				}
+
 				// Helper: recursively collect all child solution IDs from an improvement task's children
 				const collectChildSolutionIds = (children) => {
 					const ids = []
@@ -5622,29 +5647,6 @@ module.exports = class UserProjectsHelper {
 						}
 					}
 
-					if (categoryExternalIds && categoryExternalIds.length > 0) {
-						const leafCategoryDocs = await projectCategoriesQueries.categoryDocuments(
-							{ externalId: { $in: categoryExternalIds }, tenantId: tenantId },
-							['_id', 'name', 'externalId', 'evidences']
-						)
-
-						const leafIds = leafCategoryDocs.map((c) => c._id.toString())
-						const allCategoryIds =
-							leafIds.length > 0
-								? await libraryCategoriesHelper.collectCategoryIdsWithAncestors(leafIds, tenantId)
-								: []
-
-						if (allCategoryIds.length > 0) {
-							const categoryObjectIds = allCategoryIds.map((id) =>
-								ObjectId.isValid(id) ? new ObjectId(id) : id
-							)
-							updatedCategories = await projectCategoriesQueries.categoryDocuments(
-								{ _id: { $in: categoryObjectIds }, tenantId: tenantId },
-								['_id', 'name', 'externalId', 'evidences']
-							)
-						}
-					}
-
 					// Step 2i: Generate new task hierarchy (same logic as createProjectPlan)
 					const newTaskName = targetTaskName || newTemplateDoc.title || 'Template'
 					const newTaskExternalId = `task-${uuidv4().replace(/-/g, '')}`
@@ -5708,7 +5710,7 @@ module.exports = class UserProjectsHelper {
 					// Step 2j: Reattach custom tasks — from request if provided, else carry over from old hierarchy (Option A: append to bottom)
 					let processedCustomTasks = []
 					const customTasksToReattach =
-						customTasks && customTasks.length > 0
+						Array.isArray(customTasks) && customTasks.length > 0
 							? customTasks
 							: (oldTask.children || []).filter((t) => t.isACustomTask)
 

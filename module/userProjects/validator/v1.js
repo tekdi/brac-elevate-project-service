@@ -5,6 +5,8 @@
  * Description : Projects.
  */
 
+const { isValid: isValidObjectId } = require('mongoose').Types.ObjectId
+
 module.exports = (req) => {
 	let projectsValidator = {
 		sync: function () {
@@ -150,9 +152,17 @@ module.exports = (req) => {
 					}
 					return replacements.every((r) => {
 						if (!r.existingTemplateId) throw new Error('Each replacement must have existingTemplateId')
+						if (!isValidObjectId(r.existingTemplateId))
+							throw new Error('existingTemplateId must be a valid MongoDB ObjectId')
 						if (!r.existingCategoryId) throw new Error('Each replacement must have existingCategoryId')
+						if (!isValidObjectId(r.existingCategoryId))
+							throw new Error('existingCategoryId must be a valid MongoDB ObjectId')
 						if (!r.newTemplateId) throw new Error('Each replacement must have newTemplateId')
+						if (!isValidObjectId(r.newTemplateId))
+							throw new Error('newTemplateId must be a valid MongoDB ObjectId')
 						if (!r.newCategoryId) throw new Error('Each replacement must have newCategoryId')
+						if (!isValidObjectId(r.newCategoryId))
+							throw new Error('newCategoryId must be a valid MongoDB ObjectId')
 						return true
 					})
 				})
