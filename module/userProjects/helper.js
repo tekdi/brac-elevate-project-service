@@ -5599,22 +5599,45 @@ module.exports = class UserProjectsHelper {
 						}
 					}
 
-					// Case 1 / Case 2: Same template — only update custom tasks (and optionally category)
+					/**
+					 * Replacement type detection.
+					 *
+					 * Case 1 — Same template, same category:
+					 *   Only custom tasks are updated (add/remove). No replacementHistory entry.
+					 *   Template tasks, categories, and all other project data stay untouched.
+					 *
+					 * Case 2 — Same template, different category:
+					 *   projectTemplateDetails.categoryId is updated to the new category.
+					 *   Old custom tasks are removed; new custom tasks from the request are added.
+					 *   Project-level categories are updated via categoryExternalIds (resolved before loop).
+					 *   A replacementHistory entry is written recording the category change.
+					 *   The template itself is NOT replaced — previousTemplateId === newTemplateId in history.
+					 *
+					 * Case 3 — Different template:
+					 *   Falls through to the full existing replacement flow below (Steps 2e onward).
+					 */
 					const isSameTemplate = existingTemplateId.toString() === newTemplateId.toString()
 					if (isSameTemplate) {
 						const oldImprovementTaskId = oldTask._id ? oldTask._id.toString() : uuidv4()
+
+						// Separate template-driven tasks from user-added custom tasks
 						const nonCustomChildren = (oldTask.children || []).filter((t) => !t.isACustomTask)
 						const oldCustomTasks = (oldTask.children || []).filter((t) => t.isACustomTask)
 
-						// Determine new custom task set:
-						// - Array provided (even empty) → replace entirely
-						// - Not provided (undefined/null) → keep existing
+						/**
+						 * Resolve the new set of custom tasks:
+						 *   - customTasks array provided (even empty) → replace old set entirely
+						 *   - customTasks not provided (undefined/null)  → carry over existing tasks unchanged
+						 */
 						let newCustomTasks = []
 						if (Array.isArray(customTasks)) {
 							if (customTasks.length > 0) {
+								// Preserve metaInformation before _projectTask normalises the objects
 								const originalMetaInformation = customTasks.map((task) =>
 									task && task.metaInformation ? { ...task.metaInformation } : null
 								)
+
+								// Ensure every custom task has an _id before processing
 								const customTasksWithIds = customTasks
 									.map((task) => {
 										if (task && !task._id) task._id = uuidv4()
@@ -5622,6 +5645,7 @@ module.exports = class UserProjectsHelper {
 									})
 									.filter(Boolean)
 
+								// Build project-task documents (solution creation, field normalisation, etc.)
 								try {
 									newCustomTasks = await _projectTask(
 										customTasksWithIds,
@@ -5636,6 +5660,7 @@ module.exports = class UserProjectsHelper {
 									newCustomTasks = []
 								}
 
+								// Stamp required fields and restore preserved metaInformation
 								newCustomTasks.forEach((t, index) => {
 									t.isACustomTask = true
 									t.parentId = oldImprovementTaskId
@@ -5655,14 +5680,14 @@ module.exports = class UserProjectsHelper {
 									}
 								})
 							}
-							// empty array → newCustomTasks stays [] (old custom tasks removed)
+							// empty array provided → newCustomTasks stays [], removing all old custom tasks
 						} else {
-							// customTasks not provided → carry over existing
+							// customTasks not sent in request → preserve existing custom tasks as-is
 							newCustomTasks = oldCustomTasks
 						}
 
-						// Rebuild improvement task's internal taskSequence:
-						// drop old custom task externalIds, append new ones at the end
+						// Rebuild the improvement task's internal taskSequence:
+						// remove externalIds belonging to old custom tasks, then append new custom task externalIds
 						const oldCustomExternalIds = new Set(
 							oldCustomTasks.filter((t) => t.externalId).map((t) => t.externalId)
 						)
@@ -5671,6 +5696,7 @@ module.exports = class UserProjectsHelper {
 							...newCustomTasks.filter((t) => t.externalId).map((t) => t.externalId),
 						]
 
+						// Build the updated improvement task, keeping all existing fields intact
 						const updatedImprovementTask = {
 							...oldTask,
 							children: [...nonCustomChildren, ...newCustomTasks],
@@ -5679,18 +5705,24 @@ module.exports = class UserProjectsHelper {
 							updatedBy: userId,
 						}
 
-						// Case 2 only: update categoryId in projectTemplateDetails + add replacementHistory entry
+						/**
+						 * Case 2 — category has changed within the same template.
+						 * Update projectTemplateDetails.categoryId and record the change in replacementHistory.
+						 * Project-level categories array is already updated via categoryExternalIds (see pre-loop block).
+						 */
 						const isSameCategory =
 							existingCategoryId &&
 							newCategoryId &&
 							existingCategoryId.toString() === newCategoryId.toString()
+
 						if (!isSameCategory && newCategoryId) {
+							// Patch the categoryId on the improvement task's template reference
 							updatedImprovementTask.projectTemplateDetails = {
 								...(oldTask.projectTemplateDetails || {}),
 								categoryId: newCategoryId,
 							}
 
-							// Fetch old and new category docs for history entry
+							// Fetch old category doc to record its name in history
 							let oldCategoryDoc = null
 							if (existingCategoryId) {
 								const docs = await projectCategoriesQueries.categoryDocuments(
@@ -5700,6 +5732,7 @@ module.exports = class UserProjectsHelper {
 								if (docs && docs.length > 0) oldCategoryDoc = docs[0]
 							}
 
+							// Fetch new category doc to record its name in history
 							let newCategoryDoc = null
 							if (newCategoryId) {
 								const docs = await projectCategoriesQueries.categoryDocuments(
@@ -5709,6 +5742,7 @@ module.exports = class UserProjectsHelper {
 								if (docs && docs.length > 0) newCategoryDoc = docs[0]
 							}
 
+							// Build history entry — template is unchanged so previousTemplateId === newTemplateId
 							const historyEntry = {
 								previousTemplateId: existingTemplateDoc._id,
 								previousTemplateName: existingTemplateDoc.title || '',
@@ -5728,13 +5762,13 @@ module.exports = class UserProjectsHelper {
 							}
 							replacementHistoryEntries.push(historyEntry)
 						}
-						// Case 1 (same template + same category): no replacementHistory entry
+						// Case 1 (same template + same category): no replacementHistory entry written
 
 						updatedTasks[oldTaskIndex] = updatedImprovementTask
-						continue
+						continue // skip Steps 2e–2o, which are for full template replacement only
 					}
 
-					// Case 3: Different template — fall through to existing replacement flow
+					// Case 3: Different template — fall through to the full replacement flow (Steps 2e onward)
 
 					// Step 2e: Capture old sequence position
 					const oldTaskExternalId = oldTask.externalId
