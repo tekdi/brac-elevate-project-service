@@ -5599,6 +5599,143 @@ module.exports = class UserProjectsHelper {
 						}
 					}
 
+					// Case 1 / Case 2: Same template — only update custom tasks (and optionally category)
+					const isSameTemplate = existingTemplateId.toString() === newTemplateId.toString()
+					if (isSameTemplate) {
+						const oldImprovementTaskId = oldTask._id ? oldTask._id.toString() : uuidv4()
+						const nonCustomChildren = (oldTask.children || []).filter((t) => !t.isACustomTask)
+						const oldCustomTasks = (oldTask.children || []).filter((t) => t.isACustomTask)
+
+						// Determine new custom task set:
+						// - Array provided (even empty) → replace entirely
+						// - Not provided (undefined/null) → keep existing
+						let newCustomTasks = []
+						if (Array.isArray(customTasks)) {
+							if (customTasks.length > 0) {
+								const originalMetaInformation = customTasks.map((task) =>
+									task && task.metaInformation ? { ...task.metaInformation } : null
+								)
+								const customTasksWithIds = customTasks
+									.map((task) => {
+										if (task && !task._id) task._id = uuidv4()
+										return task
+									})
+									.filter(Boolean)
+
+								try {
+									newCustomTasks = await _projectTask(
+										customTasksWithIds,
+										false,
+										oldImprovementTaskId,
+										userToken,
+										project.programId,
+										userDetails
+									)
+									if (!Array.isArray(newCustomTasks)) newCustomTasks = []
+								} catch (_err) {
+									newCustomTasks = []
+								}
+
+								newCustomTasks.forEach((t, index) => {
+									t.isACustomTask = true
+									t.parentId = oldImprovementTaskId
+									t.createdBy = userId
+									t.createdAt = new Date()
+									t.updatedBy = userId
+									t.updatedAt = new Date()
+									if (!t.metaInformation) t.metaInformation = {}
+									const originalMeta = originalMetaInformation[index]
+									if (originalMeta) {
+										t.metaInformation.buttonLabel =
+											originalMeta.buttonLabel || t.metaInformation.buttonLabel || 'Upload'
+										t.metaInformation.icon = originalMeta.icon || t.metaInformation.icon || 'Upload'
+									} else {
+										t.metaInformation.buttonLabel = t.metaInformation.buttonLabel || 'Upload'
+										t.metaInformation.icon = t.metaInformation.icon || 'Upload'
+									}
+								})
+							}
+							// empty array → newCustomTasks stays [] (old custom tasks removed)
+						} else {
+							// customTasks not provided → carry over existing
+							newCustomTasks = oldCustomTasks
+						}
+
+						// Rebuild improvement task's internal taskSequence:
+						// drop old custom task externalIds, append new ones at the end
+						const oldCustomExternalIds = new Set(
+							oldCustomTasks.filter((t) => t.externalId).map((t) => t.externalId)
+						)
+						const updatedImprovementTaskSequence = [
+							...(oldTask.taskSequence || []).filter((extId) => !oldCustomExternalIds.has(extId)),
+							...newCustomTasks.filter((t) => t.externalId).map((t) => t.externalId),
+						]
+
+						const updatedImprovementTask = {
+							...oldTask,
+							children: [...nonCustomChildren, ...newCustomTasks],
+							taskSequence: updatedImprovementTaskSequence,
+							updatedAt: new Date(),
+							updatedBy: userId,
+						}
+
+						// Case 2 only: update categoryId in projectTemplateDetails + add replacementHistory entry
+						const isSameCategory =
+							existingCategoryId &&
+							newCategoryId &&
+							existingCategoryId.toString() === newCategoryId.toString()
+						if (!isSameCategory && newCategoryId) {
+							updatedImprovementTask.projectTemplateDetails = {
+								...(oldTask.projectTemplateDetails || {}),
+								categoryId: newCategoryId,
+							}
+
+							// Fetch old and new category docs for history entry
+							let oldCategoryDoc = null
+							if (existingCategoryId) {
+								const docs = await projectCategoriesQueries.categoryDocuments(
+									{ _id: existingCategoryId, tenantId: tenantId },
+									['_id', 'name', 'externalId', 'evidences']
+								)
+								if (docs && docs.length > 0) oldCategoryDoc = docs[0]
+							}
+
+							let newCategoryDoc = null
+							if (newCategoryId) {
+								const docs = await projectCategoriesQueries.categoryDocuments(
+									{ _id: newCategoryId, tenantId: tenantId },
+									['_id', 'name', 'externalId', 'evidences']
+								)
+								if (docs && docs.length > 0) newCategoryDoc = docs[0]
+							}
+
+							const historyEntry = {
+								previousTemplateId: existingTemplateDoc._id,
+								previousTemplateName: existingTemplateDoc.title || '',
+								newTemplateId: existingTemplateDoc._id,
+								newTemplateName: existingTemplateDoc.title || '',
+								replacementReason: replacementReason || '',
+								updatedBy: userId,
+								updatedAt: new Date(),
+							}
+							if (oldCategoryDoc) {
+								historyEntry.previousCategoryId = oldCategoryDoc._id
+								historyEntry.previousCategoryName = oldCategoryDoc.name || ''
+							}
+							if (newCategoryDoc) {
+								historyEntry.newCategoryId = newCategoryDoc._id
+								historyEntry.newCategoryName = newCategoryDoc.name || ''
+							}
+							replacementHistoryEntries.push(historyEntry)
+						}
+						// Case 1 (same template + same category): no replacementHistory entry
+
+						updatedTasks[oldTaskIndex] = updatedImprovementTask
+						continue
+					}
+
+					// Case 3: Different template — fall through to existing replacement flow
+
 					// Step 2e: Capture old sequence position
 					const oldTaskExternalId = oldTask.externalId
 					const sequencePosition = updatedTaskSequence.indexOf(oldTaskExternalId)
