@@ -5248,16 +5248,12 @@ module.exports = class UserProjectsHelper {
 				let taskSequence = project.taskSequence ? [...project.taskSequence] : []
 				let categories = project.categories ? [...project.categories] : []
 				let projectTemplates = project.projectTemplates ? [...project.projectTemplates] : []
-				const replacementHistoryEntries = []
-				const touchedIndices = new Set() // tracks which task indices were referenced by the request
-
-				// Snapshot old full category set BEFORE the loop so we can diff after.
+				// Snapshot old category set for noOfProjects diff at the end
 				const oldCategoryIdSet = new Set(
 					(project.categories || []).filter((c) => c._id).map((c) => c._id.toString())
 				)
 
-				// Resolve the full updated category list from the leaf categoryIds in the templates array.
-				// Collect unique categoryId values, expand to include all ancestor categories.
+				// Resolve updated categories from the request templateIds
 				const requestCategoryIds = [
 					...new Set(
 						templates
@@ -5266,7 +5262,6 @@ module.exports = class UserProjectsHelper {
 							.map((id) => String(id).trim())
 					),
 				]
-
 				if (requestCategoryIds.length > 0) {
 					const allCategoryIds = await libraryCategoriesHelper.collectCategoryIdsWithAncestors(
 						requestCategoryIds,
@@ -5283,7 +5278,6 @@ module.exports = class UserProjectsHelper {
 					}
 				}
 
-				// Helper: recursively collect all child solution IDs from an improvement task's children
 				const collectChildSolutionIds = (children) => {
 					const ids = []
 					const traverse = (taskList) => {
@@ -5304,272 +5298,126 @@ module.exports = class UserProjectsHelper {
 					return ids
 				}
 
-				for (const template of templates) {
-					const {
-						templateId: newTemplateId,
-						categoryId: newCategoryId,
-						targetTaskName,
-						customTasks,
-						excludedTaskIds,
-					} = template
+				const replacementHistoryEntries = []
 
-					// Find matching task: same template → skip, replaceableWith → replace, not found → add
-					let oldTaskIndex = tasks.findIndex(
-						(t) =>
-							t.projectTemplateDetails &&
-							t.projectTemplateDetails._id &&
-							t.projectTemplateDetails._id.toString() === newTemplateId.toString()
-					)
-					let isSameTemplate = oldTaskIndex !== -1
+				// Phase 1: Delete project tasks whose templateId is not in the request
+				const requestedTemplateIds = new Set(templates.map((t) => t.templateId.toString()))
 
-					if (!isSameTemplate) {
-						oldTaskIndex = tasks.findIndex(
-							(t) =>
-								t.projectTemplateDetails &&
-								t.projectTemplateDetails.metaInformation &&
-								t.projectTemplateDetails.metaInformation.replaceableWith &&
-								typeof t.projectTemplateDetails.metaInformation.replaceableWith !== 'boolean' &&
-								t.projectTemplateDetails.metaInformation.replaceableWith.toString() ===
-									newTemplateId.toString()
-						)
-					}
+				const tasksToDelete = tasks.filter(
+					(t) =>
+						t.projectTemplateDetails &&
+						t.projectTemplateDetails._id &&
+						!requestedTemplateIds.has(t.projectTemplateDetails._id.toString())
+				)
 
-					if (oldTaskIndex === -1) {
-						// New template — not in project yet, add it
-						const newTemplateDocs4 = await projectTemplateQueries.templateDocument(
-							{ _id: newTemplateId, status: CONSTANTS.common.PUBLISHED, tenantId: tenantId },
-							['_id', 'title', 'categories', 'externalId', 'taskSequence', 'metaInformation']
-						)
-						if (!newTemplateDocs4 || newTemplateDocs4.length === 0) {
-							throw {
-								status: HTTP_STATUS_CODE.bad_request.status,
-								message: CONSTANTS.apiResponses.PROJECT_TEMPLATE_NOT_FOUND,
+				for (const task of tasksToDelete) {
+					replacementHistoryEntries.push({
+						removedTemplateId: task.projectTemplateDetails._id,
+						removedTemplateName: task.projectTemplateDetails.name || '',
+						updatedBy: userId,
+						updatedAt: new Date(),
+					})
+					const solutionIds = collectChildSolutionIds(task.children || [])
+					if (solutionIds.length > 0) {
+						try {
+							await solutionsQueries.delete({ _id: { $in: solutionIds } })
+							for (const solutionId of solutionIds) {
+								await programsQueries.pullSolutionsFromComponents(solutionId, tenantId)
+							}
+						} catch (cleanupErr) {
+							if (global.logger) {
+								global.logger.error('updateProjectPlan: solution cleanup failed', {
+									err: cleanupErr && cleanupErr.message,
+									projectId,
+								})
 							}
 						}
-						const newImprovementTask4 = await _buildImprovementTask({
-							templateDoc: newTemplateDocs4[0],
-							categoryId: newCategoryId,
-							targetTaskName,
-							customTasks,
-							excludedTaskIds,
-							programId: project.programId,
-							userId,
-							tenantId,
-							orgId: userDetails.userInformation.organizationId,
-							userToken,
-							userDetails,
-						})
-						tasks.push(newImprovementTask4)
-						touchedIndices.add(tasks.length - 1)
-						taskSequence.push(newImprovementTask4.externalId)
-						projectTemplates.push({
-							_id: new ObjectId(newTemplateId),
-							externalId: newTemplateDocs4[0].externalId || '',
-							metaInformation: newTemplateDocs4[0].metaInformation || {},
-						})
-						continue
 					}
+				}
 
-					const oldTask = tasks[oldTaskIndex]
-					touchedIndices.add(oldTaskIndex)
+				const deletedTemplateIds = new Set(
+					tasksToDelete
+						.filter((t) => t.projectTemplateDetails && t.projectTemplateDetails._id)
+						.map((t) => t.projectTemplateDetails._id.toString())
+				)
+				tasks = tasks.filter(
+					(t) =>
+						!t.projectTemplateDetails ||
+						!t.projectTemplateDetails._id ||
+						!deletedTemplateIds.has(t.projectTemplateDetails._id.toString())
+				)
 
-					if (isSameTemplate) {
-						continue
-					}
+				// Phase 2: Add templates in request that are not yet in the project
+				const existingTemplateIds = new Set(
+					tasks
+						.filter((t) => t.projectTemplateDetails && t.projectTemplateDetails._id)
+						.map((t) => t.projectTemplateDetails._id.toString())
+				)
+				const templatesToAdd = templates.filter((t) => !existingTemplateIds.has(t.templateId.toString()))
 
-					// Template replacement (matched via replaceableWith)
-					const existingTemplateId =
-						oldTask.projectTemplateDetails && oldTask.projectTemplateDetails._id
-							? oldTask.projectTemplateDetails._id.toString()
-							: null
-					const existingCategoryId =
-						oldTask.projectTemplateDetails && oldTask.projectTemplateDetails.categoryId
-							? oldTask.projectTemplateDetails.categoryId.toString()
-							: null
-
-					let existingTemplateDoc = null
-					if (existingTemplateId) {
-						const existingTemplateDocs = await projectTemplateQueries.templateDocument(
-							{ _id: existingTemplateId, tenantId: tenantId },
-							['_id', 'metaInformation', 'externalId', 'title']
-						)
-						if (existingTemplateDocs && existingTemplateDocs.length > 0) {
-							existingTemplateDoc = existingTemplateDocs[0]
-						}
-					}
-
-					const hasCompletedTask = (taskList) => {
-						if (!Array.isArray(taskList)) return false
-						return taskList.some(
-							(t) => t.status === CONSTANTS.common.COMPLETED_STATUS || hasCompletedTask(t.children)
-						)
-					}
-					if (hasCompletedTask(oldTask.children)) {
-						throw {
-							status: 409,
-							message: CONSTANTS.apiResponses.PATHWAY_CANNOT_BE_CHANGED,
-						}
-					}
-
-					if (
-						!existingTemplateDoc ||
-						!existingTemplateDoc.metaInformation ||
-						!existingTemplateDoc.metaInformation.isReplaceable
-					) {
-						throw {
-							status: HTTP_STATUS_CODE.bad_request.status,
-							message: CONSTANTS.apiResponses.TEMPLATE_NOT_REPLACEABLE,
-						}
-					}
-
-					const oldTaskExternalId = oldTask.externalId
-					const sequencePosition = taskSequence.indexOf(oldTaskExternalId)
-
-					let oldCategory = null
-					if (existingCategoryId) {
-						const docs = await projectCategoriesQueries.categoryDocuments(
-							{ _id: existingCategoryId, tenantId: tenantId },
-							['_id', 'name', 'externalId', 'evidences']
-						)
-						if (docs && docs.length > 0) oldCategory = docs[0]
-					}
-
+				for (const template of templatesToAdd) {
+					const { templateId, categoryId, targetTaskName, customTasks, excludedTaskIds } = template
 					const newTemplateDocs = await projectTemplateQueries.templateDocument(
-						{ _id: newTemplateId, status: CONSTANTS.common.PUBLISHED, tenantId: tenantId },
+						{ _id: templateId, status: CONSTANTS.common.PUBLISHED, tenantId: tenantId },
 						['_id', 'title', 'categories', 'externalId', 'taskSequence', 'metaInformation']
 					)
 					if (!newTemplateDocs || newTemplateDocs.length === 0) {
 						throw {
 							status: HTTP_STATUS_CODE.bad_request.status,
-							message: CONSTANTS.apiResponses.REPLACEMENT_TEMPLATE_NOT_FOUND,
-						}
-					}
-					const newTemplateDoc = newTemplateDocs[0]
-
-					const oldChildSolutionIds = collectChildSolutionIds(oldTask.children || [])
-
-					let newCategoryDoc = null
-					if (newCategoryId) {
-						const newCategoryDocs = await projectCategoriesQueries.categoryDocuments(
-							{ _id: newCategoryId, tenantId: tenantId },
-							['_id', 'name', 'externalId', 'evidences']
-						)
-						if (newCategoryDocs && newCategoryDocs.length > 0) {
-							newCategoryDoc = newCategoryDocs[0]
+							message: CONSTANTS.apiResponses.PROJECT_TEMPLATE_NOT_FOUND,
 						}
 					}
 
+					const templateDoc = newTemplateDocs[0]
+					const allowedCategoryIds = new Set(
+						(templateDoc.categories || []).map((c) => (c._id ? c._id.toString() : String(c)))
+					)
+					if (!allowedCategoryIds.has(categoryId.toString())) {
+						throw {
+							status: HTTP_STATUS_CODE.bad_request.status,
+							message: `categoryId ${categoryId} is not linked to template ${templateId}`,
+						}
+					}
 					const newImprovementTask = await _buildImprovementTask({
-						templateDoc: newTemplateDoc,
-						categoryId: newCategoryId,
+						templateDoc: templateDoc,
+						categoryId,
 						targetTaskName,
 						customTasks,
 						excludedTaskIds,
-						carryOverCustomTasks: (oldTask.children || []).filter((t) => t.isACustomTask),
 						programId: project.programId,
 						userId,
 						tenantId,
 						orgId: userDetails.userInformation.organizationId,
 						userToken,
 						userDetails,
-						createdAt: oldTask.createdAt,
-						createdBy: oldTask.createdBy,
 					})
-
-					tasks[oldTaskIndex] = newImprovementTask
-					if (sequencePosition !== -1) {
-						taskSequence[sequencePosition] = newImprovementTask.externalId
-					} else {
-						taskSequence.push(newImprovementTask.externalId)
-					}
-
-					projectTemplates = projectTemplates.map((pt) =>
-						pt._id && pt._id.toString() === existingTemplateId.toString()
-							? {
-									_id: new ObjectId(newTemplateId),
-									externalId: newTemplateDoc.externalId || '',
-									metaInformation: newTemplateDoc.metaInformation || {},
-							  }
-							: pt
-					)
-
-					if (oldChildSolutionIds.length > 0) {
-						try {
-							await solutionsQueries.delete({ _id: { $in: oldChildSolutionIds } })
-							for (const solutionId of oldChildSolutionIds) {
-								await programsQueries.pullSolutionsFromComponents(solutionId, tenantId)
-							}
-						} catch (cleanupErr) {
-							if (global.logger) {
-								global.logger.error('updateProjectPlan: old solution cleanup failed', {
-									err: cleanupErr && cleanupErr.message,
-									projectId: projectId,
-								})
-							}
-						}
-					}
-
-					const historyEntry = {
-						previousTemplateId: existingTemplateDoc._id,
-						previousTemplateName: existingTemplateDoc.title || '',
-						newTemplateId: newTemplateDoc._id,
-						newTemplateName: newTemplateDoc.title || '',
-						replacementReason: '',
+					tasks.push(newImprovementTask)
+					replacementHistoryEntries.push({
+						addedTemplateId: templateDoc._id,
+						addedTemplateName: templateDoc.title || '',
 						updatedBy: userId,
 						updatedAt: new Date(),
-					}
-					if (oldCategory) {
-						historyEntry.previousCategoryId = oldCategory._id
-						historyEntry.previousCategoryName = oldCategory.name || ''
-					}
-					if (newCategoryDoc) {
-						historyEntry.newCategoryId = newCategoryDoc._id
-						historyEntry.newCategoryName = newCategoryDoc.name || ''
-					} else if (oldCategory) {
-						historyEntry.newCategoryId = oldCategory._id
-						historyEntry.newCategoryName = oldCategory.name || ''
-					}
-					replacementHistoryEntries.push(historyEntry)
+					})
 				}
 
-				// Remove tasks not referenced by any template entry in the request
-				const removedTasks = tasks.filter((_, i) => !touchedIndices.has(i))
-				if (removedTasks.length > 0) {
-					tasks = tasks.filter((_, i) => touchedIndices.has(i))
-
-					// Clean up orphaned solutions from removed tasks
-					for (const removedTask of removedTasks) {
-						const solutionIds = collectChildSolutionIds(removedTask.children || [])
-						if (solutionIds.length > 0) {
-							try {
-								await solutionsQueries.delete({ _id: { $in: solutionIds } })
-								for (const solutionId of solutionIds) {
-									await programsQueries.pullSolutionsFromComponents(solutionId, tenantId)
-								}
-							} catch (cleanupErr) {
-								if (global.logger) {
-									global.logger.error('updateProjectPlan: removed task solution cleanup failed', {
-										err: cleanupErr && cleanupErr.message,
-										projectId,
-									})
-								}
-							}
-						}
-					}
-
-					// Rebuild taskSequence — remove entries belonging to removed tasks
-					const remainingExternalIds = new Set(tasks.map((t) => t.externalId))
-					taskSequence = taskSequence.filter((extId) => remainingExternalIds.has(extId))
-
-					// Rebuild projectTemplates from remaining tasks
-					projectTemplates = tasks
+				// Phase 3: Rebuild taskSequence in request order
+				const taskByTemplateId = new Map(
+					tasks
 						.filter((t) => t.projectTemplateDetails && t.projectTemplateDetails._id)
-						.map((t) => ({
-							_id: new ObjectId(t.projectTemplateDetails._id.toString()),
-							externalId: t.projectTemplateDetails.externalId || '',
-							metaInformation: t.projectTemplateDetails.metaInformation || {},
-						}))
-				}
+						.map((t) => [t.projectTemplateDetails._id.toString(), t])
+				)
+				taskSequence = templates
+					.map((t) => taskByTemplateId.get(t.templateId.toString()))
+					.filter(Boolean)
+					.map((t) => t.externalId)
+
+				projectTemplates = tasks
+					.filter((t) => t.projectTemplateDetails && t.projectTemplateDetails._id)
+					.map((t) => ({
+						_id: new ObjectId(t.projectTemplateDetails._id.toString()),
+						externalId: t.projectTemplateDetails.externalId || '',
+						metaInformation: t.projectTemplateDetails.metaInformation || {},
+					}))
 
 				// Step 3: Increment versions, recompute taskReport, and persist
 				const currentIdpVersion = (project.metaInformation && project.metaInformation.idpVersion) || 1
@@ -5593,9 +5441,11 @@ module.exports = class UserProjectsHelper {
 						updatedBy: userId,
 						updatedAt: new Date(),
 					},
-					$push: {
-						'metaInformation.replacementHistory': { $each: replacementHistoryEntries },
-					},
+					...(replacementHistoryEntries.length > 0 && {
+						$push: {
+							'metaInformation.replacementHistory': { $each: replacementHistoryEntries },
+						},
+					}),
 				}
 
 				await projectQueries.findOneAndUpdate({ _id: projectId, tenantId: tenantId }, updatePayload, {
