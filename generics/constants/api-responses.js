@@ -330,6 +330,7 @@ module.exports = {
 	TEMPLATE_NOT_REPLACEABLE: 'Template cannot be replaced',
 	TEMPLATE_NOT_FOUND_IN_PROJECT: 'Template not found in project',
 	REPLACEMENT_TEMPLATE_NOT_FOUND: 'Replacement template not found',
+	REPLACEMENT_TEMPLATE_NOT_ALLOWED: 'Provided templateId does not match the allowed replacement for this template',
 	CATEGORY_NOT_FOUND_IN_PROJECT: 'Category does not exist in project',
 	PATHWAY_CANNOT_BE_CHANGED:
 		'Pathway cannot be changed because one or more tasks in this pillar have already been completed',

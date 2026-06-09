@@ -5348,6 +5348,12 @@ module.exports = class UserProjectsHelper {
 									templateData.metaInformation &&
 									templateData.metaInformation.isReplaceable
 								),
+								replaceableWith:
+									templateData &&
+									templateData.metaInformation &&
+									templateData.metaInformation.replaceableWith
+										? templateData.metaInformation.replaceableWith
+										: null,
 							},
 						},
 					}
@@ -5445,7 +5451,7 @@ module.exports = class UserProjectsHelper {
 	 * @method
 	 * @name updateProjectPlan
 	 * @param {String} projectId - The existing project plan ID.
-	 * @param {Object} data - Request body with replacements, replacementReason, categoryExternalIds.
+	 * @param {Object} data - Request body with templates array (same shape as createProjectPlan).
 	 * @param {String} userId - Logged-in user ID (admin/LC).
 	 * @param {String} userToken - User token.
 	 * @param {Object} userDetails - Logged-in user's info.
@@ -5454,7 +5460,7 @@ module.exports = class UserProjectsHelper {
 	static updateProjectPlan(projectId, data, userId, userToken, userDetails) {
 		return new Promise(async (resolve, reject) => {
 			try {
-				const { replacements, replacementReason, categoryExternalIds } = data
+				const { templates } = data
 				const tenantId = userDetails.userInformation.tenantId
 
 				// Step 1: Fetch the project document
@@ -5481,20 +5487,22 @@ module.exports = class UserProjectsHelper {
 					(project.categories || []).filter((c) => c._id).map((c) => c._id.toString())
 				)
 
-				// Resolve the full updated category list from categoryExternalIds ONCE before the loop.
-				// categoryExternalIds is request-level (same for all replacements), so computing it
-				// inside the loop would trigger redundant DB round-trips.
-				if (categoryExternalIds && categoryExternalIds.length > 0) {
-					const leafCategoryDocs = await projectCategoriesQueries.categoryDocuments(
-						{ externalId: { $in: categoryExternalIds }, tenantId: tenantId },
-						['_id', 'name', 'externalId', 'evidences']
-					)
-					const leafIds = leafCategoryDocs.map((c) => c._id.toString())
-					const allCategoryIds =
-						leafIds.length > 0
-							? await libraryCategoriesHelper.collectCategoryIdsWithAncestors(leafIds, tenantId)
-							: []
+				// Resolve the full updated category list from the leaf categoryIds in the templates array.
+				// Collect unique categoryId values, expand to include all ancestor categories.
+				const requestCategoryIds = [
+					...new Set(
+						templates
+							.map((t) => t.categoryId)
+							.filter((id) => id != null && String(id).trim() !== '')
+							.map((id) => String(id).trim())
+					),
+				]
 
+				if (requestCategoryIds.length > 0) {
+					const allCategoryIds = await libraryCategoriesHelper.collectCategoryIdsWithAncestors(
+						requestCategoryIds,
+						tenantId
+					)
 					if (allCategoryIds.length > 0) {
 						const categoryObjectIds = allCategoryIds.map((id) =>
 							ObjectId.isValid(id) ? new ObjectId(id) : id
@@ -5527,75 +5535,45 @@ module.exports = class UserProjectsHelper {
 					return ids
 				}
 
-				// Step 2: Process each replacement entry
-				for (const replacement of replacements) {
+				// Step 2: Process each template entry
+				for (const template of templates) {
 					const {
-						existingTemplateId,
-						existingCategoryId,
-						newTemplateId,
-						newCategoryId,
+						templateId: newTemplateId,
+						categoryId: newCategoryId,
 						targetTaskName,
 						customTasks,
 						excludedTaskIds,
-					} = replacement
+					} = template
 
-					// Step 2a: Validate existingTemplateId is in project.projectTemplates
-					const existingProjectTemplate = updatedProjectTemplates.find(
-						(pt) => pt._id && pt._id.toString() === existingTemplateId.toString()
-					)
-					if (!existingProjectTemplate) {
-						throw {
-							status: HTTP_STATUS_CODE.bad_request.status,
-							message: CONSTANTS.apiResponses.TEMPLATE_NOT_FOUND_IN_PROJECT,
-						}
-					}
-
-					// Step 2b: Fetch the existing template from DB and check isReplaceable
-					const existingTemplateDocs = await projectTemplateQueries.templateDocument(
-						{ _id: existingTemplateId, tenantId: tenantId },
-						['_id', 'metaInformation', 'externalId', 'title']
-					)
-					if (!existingTemplateDocs || existingTemplateDocs.length === 0) {
-						throw {
-							status: HTTP_STATUS_CODE.bad_request.status,
-							message: CONSTANTS.apiResponses.TEMPLATE_NOT_FOUND_IN_PROJECT,
-						}
-					}
-					const existingTemplateDoc = existingTemplateDocs[0]
-
-					if (!existingTemplateDoc.metaInformation || !existingTemplateDoc.metaInformation.isReplaceable) {
-						throw {
-							status: HTTP_STATUS_CODE.bad_request.status,
-							message: CONSTANTS.apiResponses.TEMPLATE_NOT_REPLACEABLE,
-						}
-					}
-
-					// Step 2c: Find the root improvementTask that belongs to this template
-					const oldTaskIndex = updatedTasks.findIndex(
-						(t) =>
-							t.projectTemplateDetails &&
-							t.projectTemplateDetails._id &&
-							t.projectTemplateDetails._id.toString() === existingTemplateId.toString()
-					)
+					// Step 2a: Find the root improvementTask by targetTaskName
+					const oldTaskIndex = updatedTasks.findIndex((t) => t.name === targetTaskName)
 					if (oldTaskIndex === -1) {
 						throw {
 							status: HTTP_STATUS_CODE.bad_request.status,
-							message: CONSTANTS.apiResponses.TEMPLATE_NOT_FOUND_IN_PROJECT,
+							message: `Task with name "${targetTaskName}" not found in project`,
 						}
 					}
 					const oldTask = updatedTasks[oldTaskIndex]
 
-					// Step 2d: Completion-state guard — block if any task in this hierarchy is completed
-					const hasCompletedTask = (taskList) => {
-						if (!Array.isArray(taskList)) return false
-						return taskList.some(
-							(t) => t.status === CONSTANTS.common.COMPLETED_STATUS || hasCompletedTask(t.children)
+					// Derive existing template and category IDs from the matched task
+					const existingTemplateId =
+						oldTask.projectTemplateDetails && oldTask.projectTemplateDetails._id
+							? oldTask.projectTemplateDetails._id.toString()
+							: null
+					const existingCategoryId =
+						oldTask.projectTemplateDetails && oldTask.projectTemplateDetails.categoryId
+							? oldTask.projectTemplateDetails.categoryId.toString()
+							: null
+
+					// Step 2b: Fetch the existing template from DB (needed for history entries in Cases 2 and 3)
+					let existingTemplateDoc = null
+					if (existingTemplateId) {
+						const existingTemplateDocs = await projectTemplateQueries.templateDocument(
+							{ _id: existingTemplateId, tenantId: tenantId },
+							['_id', 'metaInformation', 'externalId', 'title']
 						)
-					}
-					if (hasCompletedTask(oldTask.children)) {
-						throw {
-							status: 409,
-							message: CONSTANTS.apiResponses.PATHWAY_CANNOT_BE_CHANGED,
+						if (existingTemplateDocs && existingTemplateDocs.length > 0) {
+							existingTemplateDoc = existingTemplateDocs[0]
 						}
 					}
 
@@ -5609,14 +5587,15 @@ module.exports = class UserProjectsHelper {
 					 * Case 2 — Same template, different category:
 					 *   projectTemplateDetails.categoryId is updated to the new category.
 					 *   Old custom tasks are removed; new custom tasks from the request are added.
-					 *   Project-level categories are updated via categoryExternalIds (resolved before loop).
+					 *   Project-level categories are updated from the templates array (resolved before loop).
 					 *   A replacementHistory entry is written recording the category change.
 					 *   The template itself is NOT replaced — previousTemplateId === newTemplateId in history.
 					 *
 					 * Case 3 — Different template:
 					 *   Falls through to the full existing replacement flow below (Steps 2e onward).
 					 */
-					const isSameTemplate = existingTemplateId.toString() === newTemplateId.toString()
+					const isSameTemplate =
+						existingTemplateId != null && existingTemplateId.toString() === newTemplateId.toString()
 					if (isSameTemplate) {
 						const oldImprovementTaskId = oldTask._id ? oldTask._id.toString() : uuidv4()
 
@@ -5708,7 +5687,7 @@ module.exports = class UserProjectsHelper {
 						/**
 						 * Case 2 — category has changed within the same template.
 						 * Update projectTemplateDetails.categoryId and record the change in replacementHistory.
-						 * Project-level categories array is already updated via categoryExternalIds (see pre-loop block).
+						 * Project-level categories array is already updated from templates.categoryId values (see pre-loop block).
 						 */
 						const isSameCategory =
 							existingCategoryId &&
@@ -5748,7 +5727,7 @@ module.exports = class UserProjectsHelper {
 								previousTemplateName: existingTemplateDoc.title || '',
 								newTemplateId: existingTemplateDoc._id,
 								newTemplateName: existingTemplateDoc.title || '',
-								replacementReason: replacementReason || '',
+								replacementReason: '',
 								updatedBy: userId,
 								updatedAt: new Date(),
 							}
@@ -5769,6 +5748,57 @@ module.exports = class UserProjectsHelper {
 					}
 
 					// Case 3: Different template — fall through to the full replacement flow (Steps 2e onward)
+
+					// Block replacement if any task in this hierarchy is already completed
+					const hasCompletedTask = (taskList) => {
+						if (!Array.isArray(taskList)) return false
+						return taskList.some(
+							(t) => t.status === CONSTANTS.common.COMPLETED_STATUS || hasCompletedTask(t.children)
+						)
+					}
+					if (hasCompletedTask(oldTask.children)) {
+						throw {
+							status: 409,
+							message: CONSTANTS.apiResponses.PATHWAY_CANNOT_BE_CHANGED,
+						}
+					}
+
+					// isReplaceable check applies only when the template is actually being replaced
+					if (
+						!existingTemplateDoc ||
+						!existingTemplateDoc.metaInformation ||
+						!existingTemplateDoc.metaInformation.isReplaceable
+					) {
+						throw {
+							status: HTTP_STATUS_CODE.bad_request.status,
+							message: CONSTANTS.apiResponses.TEMPLATE_NOT_REPLACEABLE,
+						}
+					}
+
+					// Validate that newTemplateId matches the allowed replacement defined on the project.
+					// Use the value stored in projectTemplateDetails (already in memory).
+					// Boolean true means old data before the ObjectId fix — fall back to the DB value.
+					const storedReplaceableWith =
+						oldTask.projectTemplateDetails &&
+						oldTask.projectTemplateDetails.metaInformation &&
+						typeof oldTask.projectTemplateDetails.metaInformation.replaceableWith !== 'boolean'
+							? oldTask.projectTemplateDetails.metaInformation.replaceableWith
+							: null
+					const allowedReplacement =
+						storedReplaceableWith ||
+						(existingTemplateDoc &&
+							existingTemplateDoc.metaInformation &&
+							existingTemplateDoc.metaInformation.replaceableWith) ||
+						null
+					if (allowedReplacement) {
+						const allowedId = allowedReplacement.toString()
+						if (allowedId !== newTemplateId.toString()) {
+							throw {
+								status: HTTP_STATUS_CODE.bad_request.status,
+								message: CONSTANTS.apiResponses.REPLACEMENT_TEMPLATE_NOT_ALLOWED,
+							}
+						}
+					}
 
 					// Step 2e: Capture old sequence position
 					const oldTaskExternalId = oldTask.externalId
@@ -5806,7 +5836,6 @@ module.exports = class UserProjectsHelper {
 					const oldChildSolutionIds = collectChildSolutionIds(oldTask.children || [])
 
 					// Step 2h: Fetch the new leaf category directly from newCategoryId.
-					// Then rebuild the full project categories list from categoryExternalIds.
 					let newCategoryDoc = null
 					if (newCategoryId) {
 						const newCategoryDocs = await projectCategoriesQueries.categoryDocuments(
@@ -6009,6 +6038,10 @@ module.exports = class UserProjectsHelper {
 								isReplaceable: !!(
 									newTemplateDoc.metaInformation && newTemplateDoc.metaInformation.isReplaceable
 								),
+								replaceableWith:
+									newTemplateDoc.metaInformation && newTemplateDoc.metaInformation.replaceableWith
+										? newTemplateDoc.metaInformation.replaceableWith
+										: null,
 							},
 						},
 					}
@@ -6058,7 +6091,7 @@ module.exports = class UserProjectsHelper {
 						previousTemplateName: existingTemplateDoc.title || '',
 						newTemplateId: newTemplateDoc._id,
 						newTemplateName: newTemplateDoc.title || '',
-						replacementReason: replacementReason || '',
+						replacementReason: '',
 						updatedBy: userId,
 						updatedAt: new Date(),
 					}

@@ -141,42 +141,27 @@ module.exports = (req) => {
 				.isMongoId()
 				.withMessage('projectId must be a valid MongoDB ObjectId')
 
-			req.checkBody('replacements')
+			req.checkBody('templates')
 				.exists()
-				.withMessage('replacements array is required')
+				.withMessage('templates array is required')
 				.isArray()
-				.withMessage('replacements must be an array')
-				.custom((replacements) => {
-					if (!replacements || replacements.length === 0) {
-						throw new Error('replacements array cannot be empty')
+				.withMessage('templates must be an array')
+				.custom((templates) => {
+					if (!templates || templates.length === 0) {
+						throw new Error('templates array cannot be empty')
 					}
-					return replacements.every((r) => {
-						if (!r.existingTemplateId) throw new Error('Each replacement must have existingTemplateId')
-						if (!isValidObjectId(r.existingTemplateId))
-							throw new Error('existingTemplateId must be a valid MongoDB ObjectId')
-						if (!r.existingCategoryId) throw new Error('Each replacement must have existingCategoryId')
-						if (!isValidObjectId(r.existingCategoryId))
-							throw new Error('existingCategoryId must be a valid MongoDB ObjectId')
-						if (!r.newTemplateId) throw new Error('Each replacement must have newTemplateId')
-						if (!isValidObjectId(r.newTemplateId))
-							throw new Error('newTemplateId must be a valid MongoDB ObjectId')
-						if (!r.newCategoryId) throw new Error('Each replacement must have newCategoryId')
-						if (!isValidObjectId(r.newCategoryId))
-							throw new Error('newCategoryId must be a valid MongoDB ObjectId')
+					return templates.every((template) => {
+						if (!template.templateId) throw new Error('Each template must have a templateId')
+						if (!isValidObjectId(template.templateId))
+							throw new Error('templateId must be a valid MongoDB ObjectId')
+						if (
+							template.categoryId === undefined ||
+							template.categoryId === null ||
+							String(template.categoryId).trim() === ''
+						)
+							throw new Error(`Each template must have a categoryId (templateId: ${template.templateId})`)
 						return true
 					})
-				})
-
-			// replacementReason is optional — accepted as blank or absent
-
-			req.checkBody('categoryExternalIds')
-				.exists()
-				.withMessage('categoryExternalIds array is required')
-				.isArray()
-				.withMessage('categoryExternalIds must be an array')
-				.custom((ids) => {
-					if (!ids || ids.length === 0) throw new Error('categoryExternalIds cannot be empty')
-					return true
 				})
 		},
 		createProjectPlan: function () {
