@@ -1608,24 +1608,21 @@ module.exports = class UserProjects extends Abstract {
 
 	/**
 	 * @api {patch} /project/v1/userProjects/updateProjectPlan/:projectId
-	 * Update project plan — replace a Livelihood pathway template.
+	 * Update an existing project plan — add, replace, or remove templates.
 	 * @apiVersion 1.0.0
 	 * @apiGroup User Projects
 	 * @apiName updateProjectPlan
 	 * @apiParamExample {json} Request:
 	 * {
-	 *   "replacements": [
+	 *   "templates": [
 	 *     {
-	 *       "existingTemplateId": "5f5b32cef16777642d51aaf0",
-	 *       "newTemplateId": "5f5b32cef16777642d51aax0",
+	 *       "templateId": "5f5b32cef16777642d51aax0",
 	 *       "categoryId": "69e07f96bf632900141239a1",
 	 *       "targetTaskName": "Livelihoods",
 	 *       "customTasks": [],
 	 *       "excludedTaskIds": []
 	 *     }
-	 *   ],
-	 *   "replacementReason": "Participant shifted from job-seeking to entrepreneurship pathway",
-	 *   "categoryExternalIds": ["SOCIAL_PROTECTION", "FINANCIAL_INCLUSION", "LIVELIHOODS_AGRICULTURE", "SOCIAL_EMPOWERMENT"]
+	 *   ]
 	 * }
 	 * @apiSuccessExample {json} Response:
 	 * {
@@ -1637,7 +1634,7 @@ module.exports = class UserProjects extends Abstract {
 	 * @apiUse errorBody
 	 */
 	/**
-	 * Update project plan by replacing a Livelihood pathway template.
+	 * Update an existing project plan.
 	 * @method
 	 * @name updateProjectPlan
 	 * @param {Object} req - request data.
