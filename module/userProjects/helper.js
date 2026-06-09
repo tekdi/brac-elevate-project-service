@@ -5037,10 +5037,11 @@ module.exports = class UserProjectsHelper {
 					metaInformation: template.metaInformation || {},
 				}))
 
-				// Set initial IDP and project versions
-				projectData.idpVersion = 1
-				projectData.projectVersion = 1
-				projectData.replacementHistory = []
+				// Set initial version tracking inside metaInformation (not as root schema fields)
+				if (!projectData.metaInformation) projectData.metaInformation = {}
+				projectData.metaInformation.idpVersion = 1
+				projectData.metaInformation.projectVersion = 1
+				projectData.metaInformation.replacementHistory = []
 
 				// Add certificate template details to project data if present (same as detailsV2 / IDP). Project plan is private program; only add certificate when env allows.
 				if (
@@ -5102,266 +5103,34 @@ module.exports = class UserProjectsHelper {
 						continue // Skip invalid templates
 					}
 
-					// b. Create improvementProject task at root level first (to get its ID)
-					const taskName =
-						template.targetTaskName ||
-						template.targetProjectName ||
-						templateData.title ||
-						`Template ${templateIndex + 1}`
-					const taskExternalId = `task-${uuidv4().replace(/-/g, '')}`
-					const improvementTaskId = uuidv4()
-
-					// c. Fetch Template Tasks and Subtasks
+					// b. Fetch template tasks, build improvement task
 					const templateTasks = await projectTemplatesHelper.tasksAndSubTasks(
 						template.templateId,
-						'', // language
+						'',
 						tenantId,
 						orgId
 					)
-
 					if (!templateTasks || templateTasks.length === 0) {
 						continue
 					}
 
-					let excludedExternalIds = []
-					let filteredTemplateTasks = templateTasks
-					if (
-						template.excludedTaskIds &&
-						Array.isArray(template.excludedTaskIds) &&
-						template.excludedTaskIds.length > 0
-					) {
-						// Create a map for quick task lookup
-						const templateTaskMap = new Map(templateTasks.map((task) => [task._id.toString(), task]))
+					const improvementTask = await _buildImprovementTask({
+						templateDoc: templateData,
+						templateTasks,
+						categoryId: template.categoryId,
+						targetTaskName: template.targetTaskName || template.targetProjectName,
+						customTasks: template.customTasks,
+						excludedTaskIds: template.excludedTaskIds,
+						programId: masterProgramId,
+						userId,
+						tenantId,
+						orgId,
+						userToken,
+						userDetails,
+					})
 
-						for (const taskId of template.excludedTaskIds) {
-							const task = templateTaskMap.get(taskId.toString())
-							if (!task) {
-								throw {
-									status: HTTP_STATUS_CODE.bad_request.status,
-									message: `Task ID ${taskId} not found in template ${template.templateId}`,
-								}
-							}
-
-							const isDeletable = task.hasOwnProperty('isDeletable') ? task.isDeletable : false
-							if (!isDeletable) {
-								throw {
-									status: HTTP_STATUS_CODE.bad_request.status,
-									message: `Task ${task.name} (${taskId}) is not deletable and cannot be excluded`,
-								}
-							}
-							excludedExternalIds.push(task.externalId)
-						}
-
-						filteredTemplateTasks = templateTasks.filter(
-							(task) => !template.excludedTaskIds.includes(task._id.toString())
-						)
-					}
-
-					// Ensure all tasks have _id before processing (required by _projectTask)
-					const tasksWithIds = filteredTemplateTasks
-						.map((task) => {
-							if (task && !task._id) {
-								task._id = uuidv4()
-							}
-							return task
-						})
-						.filter((task) => task !== null && task !== undefined)
-
-					// d. Process Template Tasks using _projectTask with improvementTaskId as parent
-					let processedTemplateTasks = []
-					try {
-						processedTemplateTasks = await _projectTask(
-							tasksWithIds,
-							true, // isImportedFromLibrary
-							improvementTaskId, // parentTaskId - set to improvementTask._id
-							userToken,
-							masterProgramId,
-							userDetails
-						)
-					} catch (error) {
-						console.error(`Error processing template tasks for template ${template.templateId}:`, error)
-						throw error
-					}
-
-					// Ensure processedTemplateTasks is an array
-					if (!Array.isArray(processedTemplateTasks)) {
-						processedTemplateTasks = []
-					}
-
-					// e. Process Custom Tasks if provided
-					let processedCustomTasks = []
-					if (template.customTasks && template.customTasks.length > 0) {
-						// Preserve metaInformation from original request before processing
-						const originalMetaInformation = template.customTasks.map((task) => {
-							return task && task.metaInformation ? { ...task.metaInformation } : null
-						})
-
-						// Ensure all custom tasks have _id before processing
-						const customTasksWithIds = template.customTasks
-							.map((task) => {
-								if (task && !task._id) {
-									task._id = uuidv4()
-								}
-								return task
-							})
-							.filter((task) => task !== null && task !== undefined)
-
-						try {
-							processedCustomTasks = await _projectTask(
-								customTasksWithIds,
-								false, // isImportedFromLibrary
-								improvementTaskId, // parentTaskId - set to improvementTask._id
-								userToken,
-								masterProgramId,
-								userDetails
-							)
-						} catch (error) {
-							console.error(`Error processing custom tasks for template ${template.templateId}:`, error)
-							throw error
-						}
-
-						// Ensure processedCustomTasks is an array
-						if (!Array.isArray(processedCustomTasks)) {
-							processedCustomTasks = []
-						}
-
-						// Mark all custom tasks as isACustomTask: true and add metaInformation
-						processedCustomTasks.forEach((customTask, index) => {
-							customTask.isACustomTask = true
-							customTask.createdBy = userId
-							customTask.updatedBy = userId
-							customTask.createdAt = new Date()
-							customTask.updatedAt = new Date()
-
-							// Add metaInformation for custom tasks
-							if (!customTask.metaInformation) {
-								customTask.metaInformation = {}
-							}
-
-							// Use metaInformation from original request if present, else use defaults
-							const originalMeta = originalMetaInformation[index]
-							if (originalMeta) {
-								// Merge original metaInformation with processed task's metaInformation
-								customTask.metaInformation.buttonLabel =
-									originalMeta.buttonLabel || customTask.metaInformation.buttonLabel || 'Upload'
-								customTask.metaInformation.icon =
-									originalMeta.icon || customTask.metaInformation.icon || 'Upload'
-							} else {
-								// No metaInformation in original request, use defaults
-								customTask.metaInformation.buttonLabel =
-									customTask.metaInformation.buttonLabel || 'Upload'
-								customTask.metaInformation.icon = customTask.metaInformation.icon || 'Upload'
-							}
-						})
-					}
-
-					// f. Ensure parentId is set correctly for all root-level subtasks
-					if (processedTemplateTasks && Array.isArray(processedTemplateTasks)) {
-						processedTemplateTasks.forEach((task) => {
-							if (task && (!task.parentId || task.parentId !== improvementTaskId)) {
-								task.parentId = improvementTaskId
-							}
-						})
-					}
-					if (processedCustomTasks && Array.isArray(processedCustomTasks)) {
-						processedCustomTasks.forEach((task) => {
-							if (task && (!task.parentId || task.parentId !== improvementTaskId)) {
-								task.parentId = improvementTaskId
-							}
-						})
-					}
-
-					// g. Combine template tasks and custom tasks as children
-					const allSubTasks = [...processedTemplateTasks, ...processedCustomTasks]
-
-					// h. Build taskSequence for improvementTask based on template's taskSequence
-					let improvementTaskSequence = []
-
-					// If template has taskSequence, use it to order the subtasks
-					if (templateData.taskSequence && templateData.taskSequence.length > 0) {
-						// Filter out excluded external IDs from template's taskSequence
-						const filteredTemplateTaskSequence = templateData.taskSequence.filter(
-							(extId) => !excludedExternalIds.includes(extId)
-						)
-
-						// Create a map of externalId to task for quick lookup
-						const taskMap = new Map()
-						allSubTasks.forEach((task) => {
-							if (task && task.externalId) {
-								taskMap.set(task.externalId, task)
-							}
-						})
-
-						// First, add tasks in template's taskSequence order
-						filteredTemplateTaskSequence.forEach((templateTaskExternalId) => {
-							const task = taskMap.get(templateTaskExternalId)
-							if (task && task.externalId) {
-								improvementTaskSequence.push(task.externalId)
-								taskMap.delete(templateTaskExternalId) // Remove to avoid duplicates
-							}
-						})
-
-						// Then, add any remaining tasks (custom tasks or tasks not in template sequence)
-						taskMap.forEach((task) => {
-							if (task && task.externalId) {
-								improvementTaskSequence.push(task.externalId)
-							}
-						})
-					} else {
-						// If no template taskSequence, use the order of processed tasks
-						allSubTasks.forEach((subTask) => {
-							if (subTask && subTask.externalId) {
-								improvementTaskSequence.push(subTask.externalId)
-							}
-						})
-					}
-
-					let improvementTask = {
-						_id: improvementTaskId,
-						externalId: taskExternalId,
-						name: taskName,
-						description: template.targetTaskName || template.targetProjectName || templateData.title || '',
-						type: CONSTANTS.common.IMPROVEMENT_PROJECT,
-						status: CONSTANTS.common.NOT_STARTED_STATUS,
-						isACustomTask: false,
-						isDeletable: false,
-						isDeleted: false,
-						isImportedFromLibrary: false,
-						createdAt: new Date(),
-						updatedAt: new Date(),
-						createdBy: userId,
-						updatedBy: userId,
-						tenantId: tenantId,
-						orgId: orgId,
-						syncedAt: new Date(),
-						children: allSubTasks, // Template tasks + custom tasks as subtasks
-						taskSequence: improvementTaskSequence, // Children's externalIds in correct order
-						attachments: [],
-						projectTemplateDetails: {
-							_id: template.templateId,
-							externalId: templateData && templateData.externalId ? templateData.externalId : '',
-							name: templateData && templateData.title ? templateData.title : taskName,
-							categoryId: template.categoryId || null,
-							metaInformation: {
-								isReplaceable: !!(
-									templateData &&
-									templateData.metaInformation &&
-									templateData.metaInformation.isReplaceable
-								),
-								replaceableWith:
-									templateData &&
-									templateData.metaInformation &&
-									templateData.metaInformation.replaceableWith
-										? templateData.metaInformation.replaceableWith
-										: null,
-							},
-						},
-					}
-
-					// Add improvementProject task to project
-					// Root taskSequence should only contain improvementTask externalIds (not subtasks)
 					projectData.tasks.push(improvementTask)
-					projectData.taskSequence.push(taskExternalId)
+					projectData.taskSequence.push(improvementTask.externalId)
 				}
 
 				// Step 5: Initialize task report for Project
@@ -5447,7 +5216,7 @@ module.exports = class UserProjectsHelper {
 	}
 
 	/**
-	 * Update project plan by replacing a Livelihood pathway template.
+	 * Update an existing project plan — replace templates, update categories, or modify custom tasks.
 	 * @method
 	 * @name updateProjectPlan
 	 * @param {String} projectId - The existing project plan ID.
@@ -5475,12 +5244,12 @@ module.exports = class UserProjectsHelper {
 
 				const project = projectDocs[0]
 
-				// Build mutable copies we will modify through the replacements loop
-				let updatedTasks = project.tasks ? [...project.tasks] : []
-				let updatedTaskSequence = project.taskSequence ? [...project.taskSequence] : []
-				let updatedCategories = project.categories ? [...project.categories] : []
-				let updatedProjectTemplates = project.projectTemplates ? [...project.projectTemplates] : []
+				let tasks = project.tasks ? [...project.tasks] : []
+				let taskSequence = project.taskSequence ? [...project.taskSequence] : []
+				let categories = project.categories ? [...project.categories] : []
+				let projectTemplates = project.projectTemplates ? [...project.projectTemplates] : []
 				const replacementHistoryEntries = []
+				const touchedIndices = new Set() // tracks which task indices were referenced by the request
 
 				// Snapshot old full category set BEFORE the loop so we can diff after.
 				const oldCategoryIdSet = new Set(
@@ -5507,7 +5276,7 @@ module.exports = class UserProjectsHelper {
 						const categoryObjectIds = allCategoryIds.map((id) =>
 							ObjectId.isValid(id) ? new ObjectId(id) : id
 						)
-						updatedCategories = await projectCategoriesQueries.categoryDocuments(
+						categories = await projectCategoriesQueries.categoryDocuments(
 							{ _id: { $in: categoryObjectIds }, tenantId: tenantId },
 							['_id', 'name', 'externalId', 'evidences']
 						)
@@ -5535,7 +5304,6 @@ module.exports = class UserProjectsHelper {
 					return ids
 				}
 
-				// Step 2: Process each template entry
 				for (const template of templates) {
 					const {
 						templateId: newTemplateId,
@@ -5545,17 +5313,71 @@ module.exports = class UserProjectsHelper {
 						excludedTaskIds,
 					} = template
 
-					// Step 2a: Find the root improvementTask by targetTaskName
-					const oldTaskIndex = updatedTasks.findIndex((t) => t.name === targetTaskName)
-					if (oldTaskIndex === -1) {
-						throw {
-							status: HTTP_STATUS_CODE.bad_request.status,
-							message: `Task with name "${targetTaskName}" not found in project`,
-						}
-					}
-					const oldTask = updatedTasks[oldTaskIndex]
+					// Find matching task: same template → skip, replaceableWith → replace, not found → add
+					let oldTaskIndex = tasks.findIndex(
+						(t) =>
+							t.projectTemplateDetails &&
+							t.projectTemplateDetails._id &&
+							t.projectTemplateDetails._id.toString() === newTemplateId.toString()
+					)
+					let isSameTemplate = oldTaskIndex !== -1
 
-					// Derive existing template and category IDs from the matched task
+					if (!isSameTemplate) {
+						oldTaskIndex = tasks.findIndex(
+							(t) =>
+								t.projectTemplateDetails &&
+								t.projectTemplateDetails.metaInformation &&
+								t.projectTemplateDetails.metaInformation.replaceableWith &&
+								typeof t.projectTemplateDetails.metaInformation.replaceableWith !== 'boolean' &&
+								t.projectTemplateDetails.metaInformation.replaceableWith.toString() ===
+									newTemplateId.toString()
+						)
+					}
+
+					if (oldTaskIndex === -1) {
+						// New template — not in project yet, add it
+						const newTemplateDocs4 = await projectTemplateQueries.templateDocument(
+							{ _id: newTemplateId, status: CONSTANTS.common.PUBLISHED, tenantId: tenantId },
+							['_id', 'title', 'categories', 'externalId', 'taskSequence', 'metaInformation']
+						)
+						if (!newTemplateDocs4 || newTemplateDocs4.length === 0) {
+							throw {
+								status: HTTP_STATUS_CODE.bad_request.status,
+								message: CONSTANTS.apiResponses.PROJECT_TEMPLATE_NOT_FOUND,
+							}
+						}
+						const newImprovementTask4 = await _buildImprovementTask({
+							templateDoc: newTemplateDocs4[0],
+							categoryId: newCategoryId,
+							targetTaskName,
+							customTasks,
+							excludedTaskIds,
+							programId: project.programId,
+							userId,
+							tenantId,
+							orgId: userDetails.userInformation.organizationId,
+							userToken,
+							userDetails,
+						})
+						tasks.push(newImprovementTask4)
+						touchedIndices.add(tasks.length - 1)
+						taskSequence.push(newImprovementTask4.externalId)
+						projectTemplates.push({
+							_id: new ObjectId(newTemplateId),
+							externalId: newTemplateDocs4[0].externalId || '',
+							metaInformation: newTemplateDocs4[0].metaInformation || {},
+						})
+						continue
+					}
+
+					const oldTask = tasks[oldTaskIndex]
+					touchedIndices.add(oldTaskIndex)
+
+					if (isSameTemplate) {
+						continue
+					}
+
+					// Template replacement (matched via replaceableWith)
 					const existingTemplateId =
 						oldTask.projectTemplateDetails && oldTask.projectTemplateDetails._id
 							? oldTask.projectTemplateDetails._id.toString()
@@ -5565,7 +5387,6 @@ module.exports = class UserProjectsHelper {
 							? oldTask.projectTemplateDetails.categoryId.toString()
 							: null
 
-					// Step 2b: Fetch the existing template from DB (needed for history entries in Cases 2 and 3)
 					let existingTemplateDoc = null
 					if (existingTemplateId) {
 						const existingTemplateDocs = await projectTemplateQueries.templateDocument(
@@ -5577,179 +5398,6 @@ module.exports = class UserProjectsHelper {
 						}
 					}
 
-					/**
-					 * Replacement type detection.
-					 *
-					 * Case 1 — Same template, same category:
-					 *   Only custom tasks are updated (add/remove). No replacementHistory entry.
-					 *   Template tasks, categories, and all other project data stay untouched.
-					 *
-					 * Case 2 — Same template, different category:
-					 *   projectTemplateDetails.categoryId is updated to the new category.
-					 *   Old custom tasks are removed; new custom tasks from the request are added.
-					 *   Project-level categories are updated from the templates array (resolved before loop).
-					 *   A replacementHistory entry is written recording the category change.
-					 *   The template itself is NOT replaced — previousTemplateId === newTemplateId in history.
-					 *
-					 * Case 3 — Different template:
-					 *   Falls through to the full existing replacement flow below (Steps 2e onward).
-					 */
-					const isSameTemplate =
-						existingTemplateId != null && existingTemplateId.toString() === newTemplateId.toString()
-					if (isSameTemplate) {
-						const oldImprovementTaskId = oldTask._id ? oldTask._id.toString() : uuidv4()
-
-						// Separate template-driven tasks from user-added custom tasks
-						const nonCustomChildren = (oldTask.children || []).filter((t) => !t.isACustomTask)
-						const oldCustomTasks = (oldTask.children || []).filter((t) => t.isACustomTask)
-
-						/**
-						 * Resolve the new set of custom tasks:
-						 *   - customTasks array provided (even empty) → replace old set entirely
-						 *   - customTasks not provided (undefined/null)  → carry over existing tasks unchanged
-						 */
-						let newCustomTasks = []
-						if (Array.isArray(customTasks)) {
-							if (customTasks.length > 0) {
-								// Preserve metaInformation before _projectTask normalises the objects
-								const originalMetaInformation = customTasks.map((task) =>
-									task && task.metaInformation ? { ...task.metaInformation } : null
-								)
-
-								// Ensure every custom task has an _id before processing
-								const customTasksWithIds = customTasks
-									.map((task) => {
-										if (task && !task._id) task._id = uuidv4()
-										return task
-									})
-									.filter(Boolean)
-
-								// Build project-task documents (solution creation, field normalisation, etc.)
-								try {
-									newCustomTasks = await _projectTask(
-										customTasksWithIds,
-										false,
-										oldImprovementTaskId,
-										userToken,
-										project.programId,
-										userDetails
-									)
-									if (!Array.isArray(newCustomTasks)) newCustomTasks = []
-								} catch (_err) {
-									newCustomTasks = []
-								}
-
-								// Stamp required fields and restore preserved metaInformation
-								newCustomTasks.forEach((t, index) => {
-									t.isACustomTask = true
-									t.parentId = oldImprovementTaskId
-									t.createdBy = userId
-									t.createdAt = new Date()
-									t.updatedBy = userId
-									t.updatedAt = new Date()
-									if (!t.metaInformation) t.metaInformation = {}
-									const originalMeta = originalMetaInformation[index]
-									if (originalMeta) {
-										t.metaInformation.buttonLabel =
-											originalMeta.buttonLabel || t.metaInformation.buttonLabel || 'Upload'
-										t.metaInformation.icon = originalMeta.icon || t.metaInformation.icon || 'Upload'
-									} else {
-										t.metaInformation.buttonLabel = t.metaInformation.buttonLabel || 'Upload'
-										t.metaInformation.icon = t.metaInformation.icon || 'Upload'
-									}
-								})
-							}
-							// empty array provided → newCustomTasks stays [], removing all old custom tasks
-						} else {
-							// customTasks not sent in request → preserve existing custom tasks as-is
-							newCustomTasks = oldCustomTasks
-						}
-
-						// Rebuild the improvement task's internal taskSequence:
-						// remove externalIds belonging to old custom tasks, then append new custom task externalIds
-						const oldCustomExternalIds = new Set(
-							oldCustomTasks.filter((t) => t.externalId).map((t) => t.externalId)
-						)
-						const updatedImprovementTaskSequence = [
-							...(oldTask.taskSequence || []).filter((extId) => !oldCustomExternalIds.has(extId)),
-							...newCustomTasks.filter((t) => t.externalId).map((t) => t.externalId),
-						]
-
-						// Build the updated improvement task, keeping all existing fields intact
-						const updatedImprovementTask = {
-							...oldTask,
-							children: [...nonCustomChildren, ...newCustomTasks],
-							taskSequence: updatedImprovementTaskSequence,
-							updatedAt: new Date(),
-							updatedBy: userId,
-						}
-
-						/**
-						 * Case 2 — category has changed within the same template.
-						 * Update projectTemplateDetails.categoryId and record the change in replacementHistory.
-						 * Project-level categories array is already updated from templates.categoryId values (see pre-loop block).
-						 */
-						const isSameCategory =
-							existingCategoryId &&
-							newCategoryId &&
-							existingCategoryId.toString() === newCategoryId.toString()
-
-						if (!isSameCategory && newCategoryId) {
-							// Patch the categoryId on the improvement task's template reference
-							updatedImprovementTask.projectTemplateDetails = {
-								...(oldTask.projectTemplateDetails || {}),
-								categoryId: newCategoryId,
-							}
-
-							// Fetch old category doc to record its name in history
-							let oldCategoryDoc = null
-							if (existingCategoryId) {
-								const docs = await projectCategoriesQueries.categoryDocuments(
-									{ _id: existingCategoryId, tenantId: tenantId },
-									['_id', 'name', 'externalId', 'evidences']
-								)
-								if (docs && docs.length > 0) oldCategoryDoc = docs[0]
-							}
-
-							// Fetch new category doc to record its name in history
-							let newCategoryDoc = null
-							if (newCategoryId) {
-								const docs = await projectCategoriesQueries.categoryDocuments(
-									{ _id: newCategoryId, tenantId: tenantId },
-									['_id', 'name', 'externalId', 'evidences']
-								)
-								if (docs && docs.length > 0) newCategoryDoc = docs[0]
-							}
-
-							// Build history entry — template is unchanged so previousTemplateId === newTemplateId
-							const historyEntry = {
-								previousTemplateId: existingTemplateDoc._id,
-								previousTemplateName: existingTemplateDoc.title || '',
-								newTemplateId: existingTemplateDoc._id,
-								newTemplateName: existingTemplateDoc.title || '',
-								replacementReason: '',
-								updatedBy: userId,
-								updatedAt: new Date(),
-							}
-							if (oldCategoryDoc) {
-								historyEntry.previousCategoryId = oldCategoryDoc._id
-								historyEntry.previousCategoryName = oldCategoryDoc.name || ''
-							}
-							if (newCategoryDoc) {
-								historyEntry.newCategoryId = newCategoryDoc._id
-								historyEntry.newCategoryName = newCategoryDoc.name || ''
-							}
-							replacementHistoryEntries.push(historyEntry)
-						}
-						// Case 1 (same template + same category): no replacementHistory entry written
-
-						updatedTasks[oldTaskIndex] = updatedImprovementTask
-						continue // skip Steps 2e–2o, which are for full template replacement only
-					}
-
-					// Case 3: Different template — fall through to the full replacement flow (Steps 2e onward)
-
-					// Block replacement if any task in this hierarchy is already completed
 					const hasCompletedTask = (taskList) => {
 						if (!Array.isArray(taskList)) return false
 						return taskList.some(
@@ -5763,7 +5411,6 @@ module.exports = class UserProjectsHelper {
 						}
 					}
 
-					// isReplaceable check applies only when the template is actually being replaced
 					if (
 						!existingTemplateDoc ||
 						!existingTemplateDoc.metaInformation ||
@@ -5775,37 +5422,9 @@ module.exports = class UserProjectsHelper {
 						}
 					}
 
-					// Validate that newTemplateId matches the allowed replacement defined on the project.
-					// Use the value stored in projectTemplateDetails (already in memory).
-					// Boolean true means old data before the ObjectId fix — fall back to the DB value.
-					const storedReplaceableWith =
-						oldTask.projectTemplateDetails &&
-						oldTask.projectTemplateDetails.metaInformation &&
-						typeof oldTask.projectTemplateDetails.metaInformation.replaceableWith !== 'boolean'
-							? oldTask.projectTemplateDetails.metaInformation.replaceableWith
-							: null
-					const allowedReplacement =
-						storedReplaceableWith ||
-						(existingTemplateDoc &&
-							existingTemplateDoc.metaInformation &&
-							existingTemplateDoc.metaInformation.replaceableWith) ||
-						null
-					if (allowedReplacement) {
-						const allowedId = allowedReplacement.toString()
-						if (allowedId !== newTemplateId.toString()) {
-							throw {
-								status: HTTP_STATUS_CODE.bad_request.status,
-								message: CONSTANTS.apiResponses.REPLACEMENT_TEMPLATE_NOT_ALLOWED,
-							}
-						}
-					}
-
-					// Step 2e: Capture old sequence position
 					const oldTaskExternalId = oldTask.externalId
-					const sequencePosition = updatedTaskSequence.indexOf(oldTaskExternalId)
+					const sequencePosition = taskSequence.indexOf(oldTaskExternalId)
 
-					// Fetch old and new category documents directly — no fallback needed.
-					// existingCategoryId = the category being removed; newCategoryId = the category being added.
 					let oldCategory = null
 					if (existingCategoryId) {
 						const docs = await projectCategoriesQueries.categoryDocuments(
@@ -5815,13 +5434,8 @@ module.exports = class UserProjectsHelper {
 						if (docs && docs.length > 0) oldCategory = docs[0]
 					}
 
-					// Step 2f: Fetch new template from DB
 					const newTemplateDocs = await projectTemplateQueries.templateDocument(
-						{
-							_id: newTemplateId,
-							status: CONSTANTS.common.PUBLISHED,
-							tenantId: tenantId,
-						},
+						{ _id: newTemplateId, status: CONSTANTS.common.PUBLISHED, tenantId: tenantId },
 						['_id', 'title', 'categories', 'externalId', 'taskSequence', 'metaInformation']
 					)
 					if (!newTemplateDocs || newTemplateDocs.length === 0) {
@@ -5832,10 +5446,8 @@ module.exports = class UserProjectsHelper {
 					}
 					const newTemplateDoc = newTemplateDocs[0]
 
-					// Step 2g: Collect old child solution IDs — will be deleted after new hierarchy is built
 					const oldChildSolutionIds = collectChildSolutionIds(oldTask.children || [])
 
-					// Step 2h: Fetch the new leaf category directly from newCategoryId.
 					let newCategoryDoc = null
 					if (newCategoryId) {
 						const newCategoryDocs = await projectCategoriesQueries.categoryDocuments(
@@ -5847,215 +5459,31 @@ module.exports = class UserProjectsHelper {
 						}
 					}
 
-					// Step 2i: Generate new task hierarchy (same logic as createProjectPlan)
-					const newTaskName = targetTaskName || newTemplateDoc.title || 'Template'
-					const newTaskExternalId = `task-${uuidv4().replace(/-/g, '')}`
-					const newImprovementTaskId = uuidv4()
-
-					const newTemplateTasks = await projectTemplatesHelper.tasksAndSubTasks(
-						newTemplateId,
-						'',
+					const newImprovementTask = await _buildImprovementTask({
+						templateDoc: newTemplateDoc,
+						categoryId: newCategoryId,
+						targetTaskName,
+						customTasks,
+						excludedTaskIds,
+						carryOverCustomTasks: (oldTask.children || []).filter((t) => t.isACustomTask),
+						programId: project.programId,
+						userId,
 						tenantId,
-						userDetails.userInformation.organizationId
-					)
-
-					let excludedExternalIds = []
-					let filteredNewTemplateTasks = newTemplateTasks || []
-
-					if (excludedTaskIds && Array.isArray(excludedTaskIds) && excludedTaskIds.length > 0) {
-						const templateTaskMap = new Map(
-							(newTemplateTasks || []).map((task) => [task._id.toString(), task])
-						)
-						for (const taskId of excludedTaskIds) {
-							const task = templateTaskMap.get(taskId.toString())
-							if (!task) {
-								throw {
-									status: HTTP_STATUS_CODE.bad_request.status,
-									message: `Task ID ${taskId} not found in replacement template ${newTemplateId}`,
-								}
-							}
-							if (!task.isDeletable) {
-								throw {
-									status: HTTP_STATUS_CODE.bad_request.status,
-									message: `Task ${task.name} (${taskId}) is not deletable and cannot be excluded`,
-								}
-							}
-							excludedExternalIds.push(task.externalId)
-						}
-						filteredNewTemplateTasks = (newTemplateTasks || []).filter(
-							(task) => !excludedTaskIds.includes(task._id.toString())
-						)
-					}
-
-					const newTasksWithIds = filteredNewTemplateTasks
-						.map((task) => {
-							if (task && !task._id) task._id = uuidv4()
-							return task
-						})
-						.filter(Boolean)
-
-					let processedNewTemplateTasks = []
-					if (newTasksWithIds.length > 0) {
-						processedNewTemplateTasks = await _projectTask(
-							newTasksWithIds,
-							true,
-							newImprovementTaskId,
-							userToken,
-							project.programId,
-							userDetails
-						)
-						if (!Array.isArray(processedNewTemplateTasks)) processedNewTemplateTasks = []
-					}
-
-					// Step 2j: Reattach custom tasks — from request if provided, else carry over from old hierarchy (Option A: append to bottom)
-					let processedCustomTasks = []
-					const customTasksToReattach =
-						Array.isArray(customTasks) && customTasks.length > 0
-							? customTasks
-							: (oldTask.children || []).filter((t) => t.isACustomTask)
-
-					if (customTasksToReattach.length > 0) {
-						// Preserve metaInformation from the source tasks before _projectTask strips fields
-						const originalMetaInformation = customTasksToReattach.map((task) =>
-							task && task.metaInformation ? { ...task.metaInformation } : null
-						)
-
-						const customTasksWithIds = customTasksToReattach
-							.map((task) => {
-								if (task && !task._id) task._id = uuidv4()
-								return task
-							})
-							.filter(Boolean)
-
-						try {
-							processedCustomTasks = await _projectTask(
-								customTasksWithIds,
-								false,
-								newImprovementTaskId,
-								userToken,
-								project.programId,
-								userDetails
-							)
-							if (!Array.isArray(processedCustomTasks)) processedCustomTasks = []
-						} catch (_err) {
-							processedCustomTasks = []
-						}
-
-						const isFromRequest = customTasks && customTasks.length > 0
-
-						processedCustomTasks.forEach((t, index) => {
-							t.isACustomTask = true
-							t.parentId = newImprovementTaskId
-							t.updatedBy = userId
-							t.updatedAt = new Date()
-
-							// For new custom tasks from the request, stamp creation fields
-							if (isFromRequest) {
-								t.createdBy = userId
-								t.createdAt = new Date()
-							} else {
-								// Carried-over from old hierarchy — preserve original creation metadata
-								if (!t.createdBy) t.createdBy = userId
-								if (!t.createdAt) t.createdAt = new Date()
-							}
-
-							// Merge metaInformation: use original if present, fall back to defaults
-							if (!t.metaInformation) t.metaInformation = {}
-							const originalMeta = originalMetaInformation[index]
-							if (originalMeta) {
-								t.metaInformation.buttonLabel =
-									originalMeta.buttonLabel || t.metaInformation.buttonLabel || 'Upload'
-								t.metaInformation.icon = originalMeta.icon || t.metaInformation.icon || 'Upload'
-							} else {
-								t.metaInformation.buttonLabel = t.metaInformation.buttonLabel || 'Upload'
-								t.metaInformation.icon = t.metaInformation.icon || 'Upload'
-							}
-						})
-					}
-
-					// Ensure parentId is set for all template subtasks
-					processedNewTemplateTasks.forEach((t) => {
-						if (t && (!t.parentId || t.parentId !== newImprovementTaskId)) {
-							t.parentId = newImprovementTaskId
-						}
+						orgId: userDetails.userInformation.organizationId,
+						userToken,
+						userDetails,
+						createdAt: oldTask.createdAt,
+						createdBy: oldTask.createdBy,
 					})
 
-					const allNewSubTasks = [...processedNewTemplateTasks, ...processedCustomTasks]
-
-					// Build taskSequence for new improvementTask
-					let newImprovementTaskSequence = []
-					if (newTemplateDoc.taskSequence && newTemplateDoc.taskSequence.length > 0) {
-						const filteredSeq = newTemplateDoc.taskSequence.filter(
-							(extId) => !excludedExternalIds.includes(extId)
-						)
-						const taskMap = new Map()
-						allNewSubTasks.forEach((t) => {
-							if (t && t.externalId) taskMap.set(t.externalId, t)
-						})
-						filteredSeq.forEach((extId) => {
-							if (taskMap.has(extId)) {
-								newImprovementTaskSequence.push(extId)
-								taskMap.delete(extId)
-							}
-						})
-						taskMap.forEach((t) => {
-							if (t && t.externalId) newImprovementTaskSequence.push(t.externalId)
-						})
-					} else {
-						allNewSubTasks.forEach((t) => {
-							if (t && t.externalId) newImprovementTaskSequence.push(t.externalId)
-						})
-					}
-
-					// Step 2k: Build the new improvementTask
-					const newImprovementTask = {
-						_id: newImprovementTaskId,
-						externalId: newTaskExternalId,
-						name: newTaskName,
-						description: newTaskName,
-						type: CONSTANTS.common.IMPROVEMENT_PROJECT,
-						status: CONSTANTS.common.NOT_STARTED_STATUS,
-						isACustomTask: false,
-						isDeletable: false,
-						isDeleted: false,
-						isImportedFromLibrary: false,
-						createdAt: oldTask.createdAt || new Date(),
-						updatedAt: new Date(),
-						createdBy: oldTask.createdBy || userId,
-						updatedBy: userId,
-						tenantId: tenantId,
-						orgId: userDetails.userInformation.organizationId,
-						syncedAt: new Date(),
-						children: allNewSubTasks,
-						taskSequence: newImprovementTaskSequence,
-						attachments: [],
-						projectTemplateDetails: {
-							_id: newTemplateId,
-							externalId: newTemplateDoc.externalId || '',
-							name: newTemplateDoc.title || newTaskName,
-							categoryId: newCategoryId || null,
-							metaInformation: {
-								isReplaceable: !!(
-									newTemplateDoc.metaInformation && newTemplateDoc.metaInformation.isReplaceable
-								),
-								replaceableWith:
-									newTemplateDoc.metaInformation && newTemplateDoc.metaInformation.replaceableWith
-										? newTemplateDoc.metaInformation.replaceableWith
-										: null,
-							},
-						},
-					}
-
-					// Step 2l: Replace old task at the same index; update taskSequence position
-					updatedTasks[oldTaskIndex] = newImprovementTask
+					tasks[oldTaskIndex] = newImprovementTask
 					if (sequencePosition !== -1) {
-						updatedTaskSequence[sequencePosition] = newTaskExternalId
+						taskSequence[sequencePosition] = newImprovementTask.externalId
 					} else {
-						updatedTaskSequence.push(newTaskExternalId)
+						taskSequence.push(newImprovementTask.externalId)
 					}
 
-					// Step 2m: Update projectTemplates — swap old entry for new
-					updatedProjectTemplates = updatedProjectTemplates.map((pt) =>
+					projectTemplates = projectTemplates.map((pt) =>
 						pt._id && pt._id.toString() === existingTemplateId.toString()
 							? {
 									_id: new ObjectId(newTemplateId),
@@ -6065,16 +5493,13 @@ module.exports = class UserProjectsHelper {
 							: pt
 					)
 
-					// Step 2n: Clean up old child solutions now that new hierarchy is confirmed
 					if (oldChildSolutionIds.length > 0) {
 						try {
 							await solutionsQueries.delete({ _id: { $in: oldChildSolutionIds } })
-							// Remove their references from program components
 							for (const solutionId of oldChildSolutionIds) {
 								await programsQueries.pullSolutionsFromComponents(solutionId, tenantId)
 							}
 						} catch (cleanupErr) {
-							// Log but do not fail the update — orphaned solutions are preferable to a failed replacement
 							if (global.logger) {
 								global.logger.error('updateProjectPlan: old solution cleanup failed', {
 									err: cleanupErr && cleanupErr.message,
@@ -6084,8 +5509,6 @@ module.exports = class UserProjectsHelper {
 						}
 					}
 
-					// Step 2o: Build replacementHistory entry — omit previous category fields entirely
-					// when the old category could not be resolved (avoids null pollution in history).
 					const historyEntry = {
 						previousTemplateId: existingTemplateDoc._id,
 						previousTemplateName: existingTemplateDoc.title || '',
@@ -6095,29 +5518,64 @@ module.exports = class UserProjectsHelper {
 						updatedBy: userId,
 						updatedAt: new Date(),
 					}
-
 					if (oldCategory) {
 						historyEntry.previousCategoryId = oldCategory._id
 						historyEntry.previousCategoryName = oldCategory.name || ''
 					}
-
 					if (newCategoryDoc) {
 						historyEntry.newCategoryId = newCategoryDoc._id
 						historyEntry.newCategoryName = newCategoryDoc.name || ''
 					} else if (oldCategory) {
-						// Same category kept — record it as both old and new
 						historyEntry.newCategoryId = oldCategory._id
 						historyEntry.newCategoryName = oldCategory.name || ''
 					}
-
 					replacementHistoryEntries.push(historyEntry)
 				}
 
-				// Step 3: Increment versions, recompute taskReport, and persist
-				const currentIdpVersion = project.idpVersion || 1
-				const currentProjectVersion = project.projectVersion || 1
+				// Remove tasks not referenced by any template entry in the request
+				const removedTasks = tasks.filter((_, i) => !touchedIndices.has(i))
+				if (removedTasks.length > 0) {
+					tasks = tasks.filter((_, i) => touchedIndices.has(i))
 
-				const activeTasks = updatedTasks.filter((t) => !t.isDeleted)
+					// Clean up orphaned solutions from removed tasks
+					for (const removedTask of removedTasks) {
+						const solutionIds = collectChildSolutionIds(removedTask.children || [])
+						if (solutionIds.length > 0) {
+							try {
+								await solutionsQueries.delete({ _id: { $in: solutionIds } })
+								for (const solutionId of solutionIds) {
+									await programsQueries.pullSolutionsFromComponents(solutionId, tenantId)
+								}
+							} catch (cleanupErr) {
+								if (global.logger) {
+									global.logger.error('updateProjectPlan: removed task solution cleanup failed', {
+										err: cleanupErr && cleanupErr.message,
+										projectId,
+									})
+								}
+							}
+						}
+					}
+
+					// Rebuild taskSequence — remove entries belonging to removed tasks
+					const remainingExternalIds = new Set(tasks.map((t) => t.externalId))
+					taskSequence = taskSequence.filter((extId) => remainingExternalIds.has(extId))
+
+					// Rebuild projectTemplates from remaining tasks
+					projectTemplates = tasks
+						.filter((t) => t.projectTemplateDetails && t.projectTemplateDetails._id)
+						.map((t) => ({
+							_id: new ObjectId(t.projectTemplateDetails._id.toString()),
+							externalId: t.projectTemplateDetails.externalId || '',
+							metaInformation: t.projectTemplateDetails.metaInformation || {},
+						}))
+				}
+
+				// Step 3: Increment versions, recompute taskReport, and persist
+				const currentIdpVersion = (project.metaInformation && project.metaInformation.idpVersion) || 1
+				const currentProjectVersion = (project.metaInformation && project.metaInformation.projectVersion) || 1
+
+				const activeTasks = tasks.filter((t) => !t.isDeleted)
 				let taskReport = { total: activeTasks.length }
 				activeTasks.forEach((task) => {
 					taskReport[task.status] = (taskReport[task.status] || 0) + 1
@@ -6125,18 +5583,18 @@ module.exports = class UserProjectsHelper {
 
 				const updatePayload = {
 					$set: {
-						tasks: updatedTasks,
-						taskSequence: updatedTaskSequence,
-						categories: updatedCategories,
-						projectTemplates: updatedProjectTemplates,
+						tasks: tasks,
+						taskSequence: taskSequence,
+						categories: categories,
+						projectTemplates: projectTemplates,
 						taskReport: taskReport,
-						idpVersion: currentIdpVersion + 1,
-						projectVersion: currentProjectVersion + 1,
+						'metaInformation.idpVersion': currentIdpVersion + 1,
+						'metaInformation.projectVersion': currentProjectVersion + 1,
 						updatedBy: userId,
 						updatedAt: new Date(),
 					},
 					$push: {
-						replacementHistory: { $each: replacementHistoryEntries },
+						'metaInformation.replacementHistory': { $each: replacementHistoryEntries },
 					},
 				}
 
@@ -6147,7 +5605,7 @@ module.exports = class UserProjectsHelper {
 				// Step 4: Update noOfProjects for the full category tree (leaf + ancestors).
 				// Diff old category set (before update) vs new (after update).
 				// Categories removed → -1; categories added → +1; unchanged → no write.
-				const newCategoryIdSet = new Set(updatedCategories.filter((c) => c._id).map((c) => c._id.toString()))
+				const newCategoryIdSet = new Set(categories.filter((c) => c._id).map((c) => c._id.toString()))
 
 				const decrementIds = [...oldCategoryIdSet]
 					.filter((id) => !newCategoryIdSet.has(id))
@@ -6703,6 +6161,214 @@ function _attachmentInformation(
  * @param {Object} userDetails - userinformation
  * @returns {Object} Project task.
  */
+
+/**
+ * Build a single improvementProject task from a project template.
+ * Shared by createProjectPlan and updateProjectPlan (Cases 3 and 4).
+ *
+ * @param {Object} templateDoc         - fetched template document
+ * @param {Array}  [templateTasks]     - pre-fetched template tasks; fetched internally if omitted
+ * @param {String} categoryId          - leaf category ID for this template entry
+ * @param {String} targetTaskName      - name for the improvement task
+ * @param {Array}  [customTasks]       - custom tasks from the request
+ * @param {Array}  [excludedTaskIds]   - template task IDs to exclude
+ * @param {Array}  [carryOverCustomTasks] - existing custom tasks to preserve when request provides none (Case 3)
+ * @param {String} programId           - project's programId
+ * @param {String} userId
+ * @param {String} tenantId
+ * @param {String} orgId
+ * @param {String} userToken
+ * @param {Object} userDetails
+ * @param {Date}   [createdAt]         - preserve original creation time (Case 3)
+ * @param {String} [createdBy]         - preserve original creator (Case 3)
+ * @returns {Object} improvementTask
+ */
+async function _buildImprovementTask({
+	templateDoc,
+	templateTasks: preloadedTemplateTasks,
+	categoryId,
+	targetTaskName,
+	customTasks,
+	excludedTaskIds,
+	carryOverCustomTasks = [],
+	programId,
+	userId,
+	tenantId,
+	orgId,
+	userToken,
+	userDetails,
+	createdAt,
+	createdBy,
+}) {
+	const taskName = targetTaskName || templateDoc.title || ''
+	const taskExternalId = `task-${uuidv4().replace(/-/g, '')}`
+	const improvementTaskId = uuidv4()
+
+	const rawTemplateTasks =
+		preloadedTemplateTasks !== undefined
+			? preloadedTemplateTasks
+			: await projectTemplatesHelper.tasksAndSubTasks(templateDoc._id.toString(), '', tenantId, orgId)
+
+	let excludedExternalIds = []
+	let filteredTemplateTasks = rawTemplateTasks || []
+	if (excludedTaskIds && Array.isArray(excludedTaskIds) && excludedTaskIds.length > 0) {
+		const taskMap = new Map((rawTemplateTasks || []).map((t) => [t._id.toString(), t]))
+		for (const taskId of excludedTaskIds) {
+			const task = taskMap.get(taskId.toString())
+			if (!task) {
+				throw {
+					status: HTTP_STATUS_CODE.bad_request.status,
+					message: `Task ID ${taskId} not found in template ${templateDoc._id}`,
+				}
+			}
+			if (!task.isDeletable) {
+				throw {
+					status: HTTP_STATUS_CODE.bad_request.status,
+					message: `Task ${task.name} (${taskId}) is not deletable and cannot be excluded`,
+				}
+			}
+			excludedExternalIds.push(task.externalId)
+		}
+		filteredTemplateTasks = (rawTemplateTasks || []).filter((t) => !excludedTaskIds.includes(t._id.toString()))
+	}
+
+	const tasksWithIds = filteredTemplateTasks
+		.map((t) => {
+			if (t && !t._id) t._id = uuidv4()
+			return t
+		})
+		.filter(Boolean)
+
+	let processedTemplateTasks = []
+	if (tasksWithIds.length > 0) {
+		try {
+			processedTemplateTasks = await _projectTask(
+				tasksWithIds,
+				true,
+				improvementTaskId,
+				userToken,
+				programId,
+				userDetails
+			)
+		} catch (error) {
+			throw error
+		}
+		if (!Array.isArray(processedTemplateTasks)) processedTemplateTasks = []
+	}
+	processedTemplateTasks.forEach((t) => {
+		if (t && (!t.parentId || t.parentId !== improvementTaskId)) t.parentId = improvementTaskId
+	})
+
+	const customTasksToProcess =
+		Array.isArray(customTasks) && customTasks.length > 0 ? customTasks : carryOverCustomTasks
+
+	let processedCustomTasks = []
+	if (customTasksToProcess.length > 0) {
+		const isFromRequest = Array.isArray(customTasks) && customTasks.length > 0
+		const originalMeta = customTasksToProcess.map((t) => (t && t.metaInformation ? { ...t.metaInformation } : null))
+		const customWithIds = customTasksToProcess
+			.map((t) => {
+				if (t && !t._id) t._id = uuidv4()
+				return t
+			})
+			.filter(Boolean)
+		try {
+			processedCustomTasks = await _projectTask(
+				customWithIds,
+				false,
+				improvementTaskId,
+				userToken,
+				programId,
+				userDetails
+			)
+			if (!Array.isArray(processedCustomTasks)) processedCustomTasks = []
+		} catch (_err) {
+			processedCustomTasks = []
+		}
+		processedCustomTasks.forEach((t, i) => {
+			t.isACustomTask = true
+			t.parentId = improvementTaskId
+			t.updatedBy = userId
+			t.updatedAt = new Date()
+			if (isFromRequest) {
+				t.createdBy = userId
+				t.createdAt = new Date()
+			} else {
+				if (!t.createdBy) t.createdBy = userId
+				if (!t.createdAt) t.createdAt = new Date()
+			}
+			if (!t.metaInformation) t.metaInformation = {}
+			const meta = originalMeta[i]
+			if (meta) {
+				t.metaInformation.buttonLabel = meta.buttonLabel || t.metaInformation.buttonLabel || 'Upload'
+				t.metaInformation.icon = meta.icon || t.metaInformation.icon || 'Upload'
+			} else {
+				t.metaInformation.buttonLabel = t.metaInformation.buttonLabel || 'Upload'
+				t.metaInformation.icon = t.metaInformation.icon || 'Upload'
+			}
+		})
+	}
+
+	const allSubTasks = [...processedTemplateTasks, ...processedCustomTasks]
+
+	let improvementTaskSequence = []
+	if (templateDoc.taskSequence && templateDoc.taskSequence.length > 0) {
+		const filteredSeq = templateDoc.taskSequence.filter((e) => !excludedExternalIds.includes(e))
+		const seqMap = new Map()
+		allSubTasks.forEach((t) => {
+			if (t && t.externalId) seqMap.set(t.externalId, t)
+		})
+		filteredSeq.forEach((e) => {
+			if (seqMap.has(e)) {
+				improvementTaskSequence.push(e)
+				seqMap.delete(e)
+			}
+		})
+		seqMap.forEach((t) => {
+			if (t && t.externalId) improvementTaskSequence.push(t.externalId)
+		})
+	} else {
+		allSubTasks.forEach((t) => {
+			if (t && t.externalId) improvementTaskSequence.push(t.externalId)
+		})
+	}
+
+	return {
+		_id: improvementTaskId,
+		externalId: taskExternalId,
+		name: taskName,
+		description: taskName,
+		type: CONSTANTS.common.IMPROVEMENT_PROJECT,
+		status: CONSTANTS.common.NOT_STARTED_STATUS,
+		isACustomTask: false,
+		isDeletable: false,
+		isDeleted: false,
+		isImportedFromLibrary: false,
+		createdAt: createdAt || new Date(),
+		updatedAt: new Date(),
+		createdBy: createdBy || userId,
+		updatedBy: userId,
+		tenantId: tenantId,
+		orgId: orgId,
+		syncedAt: new Date(),
+		children: allSubTasks,
+		taskSequence: improvementTaskSequence,
+		attachments: [],
+		projectTemplateDetails: {
+			_id: templateDoc._id,
+			externalId: templateDoc.externalId || '',
+			name: templateDoc.title || taskName,
+			categoryId: categoryId || null,
+			metaInformation: {
+				isReplaceable: !!(templateDoc.metaInformation && templateDoc.metaInformation.isReplaceable),
+				replaceableWith:
+					templateDoc.metaInformation && templateDoc.metaInformation.replaceableWith
+						? templateDoc.metaInformation.replaceableWith
+						: null,
+			},
+		},
+	}
+}
 
 async function _projectTask(
 	tasks,

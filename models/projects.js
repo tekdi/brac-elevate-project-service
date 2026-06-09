@@ -105,18 +105,6 @@ module.exports = {
 			default: [],
 			description: 'Array of project templates associated with this project',
 		},
-		idpVersion: {
-			type: Number,
-			default: 1,
-		},
-		projectVersion: {
-			type: Number,
-			default: 1,
-		},
-		replacementHistory: {
-			type: Array,
-			default: [],
-		},
 		// keywords (OPTIONAL - FOR FILTERING/SEARCH)
 		keywords: {
 			type: [String],
