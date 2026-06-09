@@ -1607,7 +1607,7 @@ module.exports = class UserProjects extends Abstract {
 	}
 
 	/**
-	 * @api {patch} /project/v1/userProjects/updateProjectPlan/:projectId
+	 * @api {post} /project/v1/userProjects/updateProjectPlan/:projectId
 	 * Update an existing project plan — add, replace, or remove templates.
 	 * @apiVersion 1.0.0
 	 * @apiGroup User Projects
