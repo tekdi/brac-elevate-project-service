@@ -5311,6 +5311,7 @@ module.exports = class UserProjectsHelper {
 				)
 
 				const deletedTemplateIds = new Set()
+				const allSolutionIds = []
 				for (const task of tasksToDelete) {
 					deletedTemplateIds.add(task.projectTemplateDetails._id.toString())
 					replacementHistoryEntries.push({
@@ -5319,20 +5320,21 @@ module.exports = class UserProjectsHelper {
 						updatedBy: userId,
 						updatedAt: new Date(),
 					})
-					const solutionIds = collectChildSolutionIds(task.children || [])
-					if (solutionIds.length > 0) {
-						try {
-							await solutionsQueries.delete({ _id: { $in: solutionIds } })
-							for (const solutionId of solutionIds) {
-								await programsQueries.pullSolutionsFromComponents(solutionId, tenantId)
-							}
-						} catch (cleanupErr) {
-							if (global.logger) {
-								global.logger.error('updateProjectPlan: solution cleanup failed', {
-									err: cleanupErr && cleanupErr.message,
-									projectId,
-								})
-							}
+					allSolutionIds.push(...collectChildSolutionIds(task.children || []))
+				}
+
+				if (allSolutionIds.length > 0) {
+					try {
+						await solutionsQueries.delete({ _id: { $in: allSolutionIds } })
+						for (const solutionId of allSolutionIds) {
+							await programsQueries.pullSolutionsFromComponents(solutionId, tenantId)
+						}
+					} catch (cleanupErr) {
+						if (global.logger) {
+							global.logger.error('updateProjectPlan: solution cleanup failed', {
+								err: cleanupErr && cleanupErr.message,
+								projectId,
+							})
 						}
 					}
 				}
