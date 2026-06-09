@@ -5310,7 +5310,9 @@ module.exports = class UserProjectsHelper {
 						!requestedTemplateIds.has(t.projectTemplateDetails._id.toString())
 				)
 
+				const deletedTemplateIds = new Set()
 				for (const task of tasksToDelete) {
+					deletedTemplateIds.add(task.projectTemplateDetails._id.toString())
 					replacementHistoryEntries.push({
 						removedTemplateId: task.projectTemplateDetails._id,
 						removedTemplateName: task.projectTemplateDetails.name || '',
@@ -5335,11 +5337,6 @@ module.exports = class UserProjectsHelper {
 					}
 				}
 
-				const deletedTemplateIds = new Set(
-					tasksToDelete
-						.filter((t) => t.projectTemplateDetails && t.projectTemplateDetails._id)
-						.map((t) => t.projectTemplateDetails._id.toString())
-				)
 				tasks = tasks.filter(
 					(t) =>
 						!t.projectTemplateDetails ||
@@ -5348,11 +5345,12 @@ module.exports = class UserProjectsHelper {
 				)
 
 				// Phase 2: Add templates in request that are not yet in the project
-				const existingTemplateIds = new Set(
-					tasks
-						.filter((t) => t.projectTemplateDetails && t.projectTemplateDetails._id)
-						.map((t) => t.projectTemplateDetails._id.toString())
-				)
+				const existingTemplateIds = new Set()
+				for (const t of tasks) {
+					if (t.projectTemplateDetails && t.projectTemplateDetails._id) {
+						existingTemplateIds.add(t.projectTemplateDetails._id.toString())
+					}
+				}
 				const templatesToAdd = templates.filter((t) => !existingTemplateIds.has(t.templateId.toString()))
 
 				for (const template of templatesToAdd) {
