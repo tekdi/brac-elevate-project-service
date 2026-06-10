@@ -325,4 +325,13 @@ module.exports = {
 	ACCESS_TOKEN_EXPIRED: 'Access Token Expired!! Please Login Again.',
 	USER_SERVICE_DOWN_CODE: 'USER_SERVICE_DOWN',
 	USER_SERVICE_DOWN: 'User service is down',
+	PROJECT_PLAN_UPDATED: 'Project plan updated successfully.',
+	PROJECT_PLAN_NOT_FOUND: 'Project plan not found',
+	TEMPLATE_NOT_REPLACEABLE: 'Template cannot be replaced',
+	TEMPLATE_NOT_FOUND_IN_PROJECT: 'Template not found in project',
+	REPLACEMENT_TEMPLATE_NOT_FOUND: 'Replacement template not found',
+	REPLACEMENT_TEMPLATE_NOT_ALLOWED: 'Provided templateId does not match the allowed replacement for this template',
+	CATEGORY_NOT_FOUND_IN_PROJECT: 'Category does not exist in project',
+	PATHWAY_CANNOT_BE_CHANGED:
+		'Pathway cannot be changed because one or more tasks in this pillar have already been completed',
 }

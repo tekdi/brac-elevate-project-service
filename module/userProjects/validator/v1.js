@@ -5,6 +5,8 @@
  * Description : Projects.
  */
 
+const { isValid: isValidObjectId } = require('mongoose').Types.ObjectId
+
 module.exports = (req) => {
 	let projectsValidator = {
 		sync: function () {
@@ -131,6 +133,36 @@ module.exports = (req) => {
 				existId = 'projectId'
 			}
 			req.checkQuery(existId).exists().withMessage('required solution or projectId Id')
+		},
+		updateProjectPlan: function () {
+			req.checkParams('_id')
+				.exists()
+				.withMessage('projectId is required in path params')
+				.isMongoId()
+				.withMessage('projectId must be a valid MongoDB ObjectId')
+
+			req.checkBody('templates')
+				.exists()
+				.withMessage('templates array is required')
+				.isArray()
+				.withMessage('templates must be an array')
+				.custom((templates) => {
+					if (!templates || templates.length === 0) {
+						throw new Error('templates array cannot be empty')
+					}
+					return templates.every((template) => {
+						if (!template.templateId) throw new Error('Each template must have a templateId')
+						if (!isValidObjectId(template.templateId))
+							throw new Error('templateId must be a valid MongoDB ObjectId')
+						if (
+							template.categoryId === undefined ||
+							template.categoryId === null ||
+							String(template.categoryId).trim() === ''
+						)
+							throw new Error(`Each template must have a categoryId (templateId: ${template.templateId})`)
+						return true
+					})
+				})
 		},
 		createProjectPlan: function () {
 			// Validate templates array

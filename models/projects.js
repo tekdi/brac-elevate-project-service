@@ -96,6 +96,10 @@ module.exports = {
 						type: String,
 						required: true,
 					},
+					metaInformation: {
+						type: Object,
+						default: {},
+					},
 				},
 			],
 			default: [],

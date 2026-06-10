@@ -1607,6 +1607,61 @@ module.exports = class UserProjects extends Abstract {
 	}
 
 	/**
+	 * @api {post} /project/v1/userProjects/updateProjectPlan/:projectId
+	 * Update an existing project plan — add, replace, or remove templates.
+	 * @apiVersion 1.0.0
+	 * @apiGroup User Projects
+	 * @apiName updateProjectPlan
+	 * @apiParamExample {json} Request:
+	 * {
+	 *   "templates": [
+	 *     {
+	 *       "templateId": "5f5b32cef16777642d51aax0",
+	 *       "categoryId": "69e07f96bf632900141239a1",
+	 *       "targetTaskName": "Livelihoods",
+	 *       "customTasks": [],
+	 *       "excludedTaskIds": []
+	 *     }
+	 *   ]
+	 * }
+	 * @apiSuccessExample {json} Response:
+	 * {
+	 *   "status": 200,
+	 *   "message": "Project plan updated successfully.",
+	 *   "result": { "projectId": "<projectId>" }
+	 * }
+	 * @apiUse successBody
+	 * @apiUse errorBody
+	 */
+	/**
+	 * Update an existing project plan.
+	 * @method
+	 * @name updateProjectPlan
+	 * @param {Object} req - request data.
+	 * @returns {JSON} Updated project plan result.
+	 */
+	async updateProjectPlan(req) {
+		return new Promise(async (resolve, reject) => {
+			try {
+				let result = await userProjectsHelper.updateProjectPlan(
+					req.params._id,
+					req.body,
+					req.userDetails.userInformation.userId,
+					req.userDetails.userToken,
+					req.userDetails
+				)
+				return resolve(result)
+			} catch (error) {
+				return reject({
+					status: error.status || HTTP_STATUS_CODE.internal_server_error.status,
+					message: error.message || HTTP_STATUS_CODE.internal_server_error.message,
+					errorObject: error,
+				})
+			}
+		})
+	}
+
+	/**
 	 * Add entities in project.
 	 * @method
 	 * @name addEntity
