@@ -4732,7 +4732,15 @@ module.exports = class UserProjectsHelper {
 	static createProjectPlan(data, userId, userToken, userDetails) {
 		return new Promise(async (resolve, reject) => {
 			try {
-				const { templates, userId: participantId, entityId, programName, projectConfig, baseTemplateId } = data
+				const {
+					templates,
+					userId: participantId,
+					entityId,
+					programName,
+					projectConfig,
+					baseTemplateId,
+					keywords,
+				} = data
 				let tenantId = userDetails.userInformation.tenantId
 				let orgId = userDetails.userInformation.organizationId
 
@@ -5021,7 +5029,10 @@ module.exports = class UserProjectsHelper {
 					tenantId: tenantId,
 					orgId: orgId,
 					categories: allCategories, // Add categories from all templates
-					keywords: ['project-plan'],
+					keywords: [
+						'project-plan',
+						...(Array.isArray(keywords) ? keywords.filter((k) => k && k !== 'project-plan') : []),
+					],
 					referenceFrom: projectConfig?.referenceFrom || '',
 					tasks: [],
 					taskSequence: [],
@@ -5229,7 +5240,7 @@ module.exports = class UserProjectsHelper {
 	static updateProjectPlan(projectId, data, userId, userToken, userDetails) {
 		return new Promise(async (resolve, reject) => {
 			try {
-				const { templates } = data
+				const { templates, keywords } = data
 				const tenantId = userDetails.userInformation.tenantId
 
 				// Step 1: Fetch the project document
@@ -5436,6 +5447,10 @@ module.exports = class UserProjectsHelper {
 						categories: categories,
 						projectTemplates: projectTemplates,
 						taskReport: taskReport,
+						keywords: [
+							'project-plan',
+							...(Array.isArray(keywords) ? keywords.filter((k) => k && k !== 'project-plan') : []),
+						],
 						'metaInformation.idpVersion': currentIdpVersion + 1,
 						'metaInformation.projectVersion': currentProjectVersion + 1,
 						updatedBy: userId,

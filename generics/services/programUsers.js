@@ -571,6 +571,7 @@ module.exports = class ProgramUsersService {
 				completed: 0,
 				graduated: 0,
 				droppedout: 0,
+				not_eligible: 0,
 				total: entities.length,
 			}
 
@@ -594,6 +595,9 @@ module.exports = class ProgramUsersService {
 					case 'DROPPED_OUT':
 						statusCounts.droppedout++
 						break
+					case 'NOT_ELIGIBLE':
+						statusCounts.not_eligible++
+						break
 				}
 			})
 
@@ -608,6 +612,7 @@ module.exports = class ProgramUsersService {
 						'overview.completed': statusCounts.completed,
 						'overview.graduated': statusCounts.graduated,
 						'overview.droppedout': statusCounts.droppedout,
+						'overview.not_eligible': statusCounts.not_eligible,
 						'overview.lastModified': new Date(),
 					},
 				})
