@@ -9570,7 +9570,7 @@ paths:
                           name: Task 1
                           description: Task 1 description
                           status: notStarted
-                          isACustomTask: false
+                          isCustomTask: false
                           startDate: '2020-09-29T09:08:41.667Z'
                           endDate: '2020-09-29T09:08:41.667Z'
                           lastModifiedAt: '2020-09-29T09:08:41.667Z'
@@ -9588,7 +9588,7 @@ paths:
                               description: Task 2 description
                               status: notStarted
                               children: []
-                              isACustomTask: false
+                              isCustomTask: false
                               startDate: '2020-09-29T09:08:41.667Z'
                               endDate: '2020-09-29T09:08:41.667Z'
                               lastModifiedAt: '2020-09-29T09:08:41.667Z'
