@@ -6151,7 +6151,7 @@ async function _buildImprovementTask({
 			processedCustomTasks = []
 		}
 		processedCustomTasks.forEach((t, i) => {
-			t.isACustomTask = true
+			t.isCustomTask = true
 			t.parentId = improvementTaskId
 			t.updatedBy = userId
 			t.updatedAt = new Date()
@@ -6205,7 +6205,7 @@ async function _buildImprovementTask({
 		description: taskName,
 		type: CONSTANTS.common.IMPROVEMENT_PROJECT,
 		status: CONSTANTS.common.NOT_STARTED_STATUS,
-		isACustomTask: false,
+		isCustomTask: false,
 		isDeletable: false,
 		isDeleted: false,
 		isImportedFromLibrary: false,
