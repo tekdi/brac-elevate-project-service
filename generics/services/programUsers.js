@@ -220,6 +220,9 @@ module.exports = class ProgramUsersService {
 
 			const userIds = paginatedEntities.map((entity) => entity.userId).filter(Boolean)
 			// Fetch user details from user service
+			// Use page=1 and limit=userIds.length because entities are already paginated above;
+			// passing the original page/limit would cause the user service to paginate again and
+			// skip results (e.g. page=2 with 5 IDs would skip all 5 and return nothing).
 			const { success, data } =
 				(await userService.accountSearch(
 					userIds,
@@ -227,8 +230,8 @@ module.exports = class ProgramUsersService {
 					'all',
 					[],
 					searchQuery,
-					page,
-					limit,
+					1,
+					Math.max(userIds.length, 1),
 					meta,
 					sortBy,
 					sortOrder
