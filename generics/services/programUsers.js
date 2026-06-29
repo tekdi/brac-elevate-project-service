@@ -4,7 +4,7 @@
  * created-date : 19-Jan-2026
  */
 
-const { result } = require('lodash')
+const { result, includes } = require('lodash')
 
 const programUsersQueries = require(DB_QUERY_BASE_PATH + '/programUsers')
 const userService = require(GENERICS_FILES_PATH + '/services/users')
@@ -178,7 +178,8 @@ module.exports = class ProgramUsersService {
 
 				if (
 					checkEntityHierarchy &&
-					(userId != entityDocData.hierarchy[0].id || userId != entityDocData.hierarchy[1].id)
+					userId != entityDocData.hierarchy[0].id &&
+					userId != entityDocData.hierarchy[1].id
 				) {
 					return {
 						status: 403,
