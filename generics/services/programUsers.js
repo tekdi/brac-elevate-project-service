@@ -178,7 +178,8 @@ module.exports = class ProgramUsersService {
 
 				if (
 					checkEntityHierarchy &&
-					(userId != entityDocData.hierarchy[0].id || userId != entityDocData.hierarchy[1].id)
+					userId != entityDocData.hierarchy[0].id &&
+					userId != entityDocData.hierarchy[1].id
 				) {
 					return {
 						status: 403,
