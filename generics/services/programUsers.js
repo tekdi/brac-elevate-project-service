@@ -156,10 +156,43 @@ module.exports = class ProgramUsersService {
 	) {
 		try {
 			const skip = (page - 1) * limit
+			let immediateCoachId
+			if (entityId) {
+				let checkEntityHierarchy = true
+				if (userDetails.userInformation.roles.includes('admin')) checkEntityHierarchy = false
 
+				const entityDocData = await this.findByUserAndProgram(
+					entityId,
+					programId,
+					programExternalId,
+					userDetails.userInformation.tenantId
+				)
+
+				if (!entityDocData) {
+					return {
+						status: 404,
+						message: 'Program user not found for given entity id',
+						data: [],
+					}
+				}
+
+				if (
+					checkEntityHierarchy &&
+					(userId != entityDocData.hierarchy[0].id || userId != entityDocData.hierarchy[1].id)
+				) {
+					return {
+						status: 403,
+						message: 'You are not authorized to access this entity',
+					}
+				}
+
+				immediateCoachId = String(entityDocData.hierarchy[0].id)
+			} else {
+				immediateCoachId = userId
+			}
 			// Find document by userId and either programId or programExternalId
 			const docData = await this.findByUserAndProgram(
-				userId,
+				immediateCoachId,
 				programId,
 				programExternalId,
 				userDetails.userInformation.tenantId
@@ -248,11 +281,17 @@ module.exports = class ProgramUsersService {
 				}
 			}
 
+			const entityHierarchy = {
+				0: immediateCoachId,
+				1: docData.hierarchy?.[0]?.id,
+			}
+
 			// Map accountSearch data with entity data from docData and filter by searchQuery
 			const filteredData = paginatedEntities.map((entity) => {
 				const userData = data.data.find((user) => user.id == entity.userId)
 				return {
 					...entity,
+					hierarchy: entityHierarchy,
 					userDetails: userData || null,
 				}
 			})
