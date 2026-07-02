@@ -262,7 +262,6 @@ module.exports = class ProgramUsersService {
 				return {
 					...entity,
 					hierarchy: entityHierarchy,
-					userDetails: null,
 				}
 			})
 
@@ -564,7 +563,6 @@ module.exports = class ProgramUsersService {
 	static async _updateOverviewAsync(programUsersId) {
 		// Placeholder for asynchronous overview update logic
 		// This could involve recalculating summary statistics or other data
-		console.log(`[ProgramUsers] Updating overview for programUsersId: ${programUsersId}`)
 
 		try {
 			// Fetch program user document
