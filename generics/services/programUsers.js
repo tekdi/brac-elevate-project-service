@@ -191,20 +191,13 @@ module.exports = class ProgramUsersService {
 			} else {
 				immediateCoachId = userId
 			}
-			// Find document by userId and either programId or programExternalId
-			console.log('DEBUG [getEntitiesWithPagination] Querying findByUserAndProgram with:', {
-				immediateCoachId,
-				programId,
-				programExternalId,
-				tenantId: userDetails.userInformation.tenantId,
-			})
+
 			const docData = await this.findByUserAndProgram(
 				immediateCoachId,
 				programId,
 				programExternalId,
 				userDetails.userInformation.tenantId
 			)
-			console.log('DEBUG [getEntitiesWithPagination] Result docData found:', !!docData)
 
 			if (!docData) {
 				return {
