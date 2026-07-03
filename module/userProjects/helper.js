@@ -6469,7 +6469,40 @@ function _fillMissingTaskInformation(tasks, tasksFromDB) {
  */
 function fillMissingProperties(eachTask, targetTask) {
 	const dateSpecificFields = ['createdAt', 'updatedAt', 'syncedAt']
+	const previousStatus = targetTask.status
+	const currentStatus = eachTask.status
+
 	for (let key in targetTask) {
+		// Handle attachments based on status changes
+		if (key === 'attachments') {
+			// If status is being changed to notStarted or incomplete, clear attachments
+			if (currentStatus && previousStatus && currentStatus !== previousStatus) {
+				if (
+					currentStatus === CONSTANTS.common.NOT_STARTED_STATUS ||
+					(currentStatus !== CONSTANTS.common.COMPLETED_STATUS &&
+						currentStatus !== CONSTANTS.common.INPROGRESS_STATUS)
+				) {
+					// Remove attachments when task is marked as notStarted or other incomplete statuses
+					eachTask[key] = []
+					continue
+				}
+				// If reverting from completed status to any other status, clear attachments
+				if (
+					previousStatus === CONSTANTS.common.COMPLETED_STATUS &&
+					currentStatus !== CONSTANTS.common.COMPLETED_STATUS
+				) {
+					eachTask[key] = []
+					continue
+				}
+			}
+
+			// If attachments are provided in the request, use them; otherwise preserve from DB
+			if (!eachTask[key] || eachTask[key].length === 0) {
+				eachTask[key] = targetTask[key] ? [...targetTask[key]] : []
+			}
+			continue
+		}
+
 		if (Array.isArray(targetTask[key])) {
 			if (!eachTask[key] || eachTask[key].length === 0) {
 				// If the array is missing or empty, copy the entire array from the targetTask
