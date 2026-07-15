@@ -6472,8 +6472,17 @@ function fillMissingProperties(eachTask, targetTask) {
 	for (let key in targetTask) {
 		if (Array.isArray(targetTask[key])) {
 			if (!eachTask[key]) {
-				// If the array is missing or empty, copy the entire array from the targetTask
+				// If the array is missing, copy the entire array from the targetTask
 				eachTask[key] = [...targetTask[key]]
+			} else if (['attachments', 'learningResources'].includes(key)) {
+				const updatedArray = []
+				eachTask[key].forEach((item) => {
+					const targetItem = targetTask[key].find((dbItem) => dbItem._id === item._id) || {}
+					const updatedItem = { ...targetItem, ...item } // Merge incoming and existing data
+					fillMissingProperties(updatedItem, targetItem)
+					updatedArray.push(updatedItem)
+				})
+				eachTask[key] = updatedArray
 			} else {
 				// Merge the two arrays: existing data from DB and incoming updates
 				const updatedArray = []
