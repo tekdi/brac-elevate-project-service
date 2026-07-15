@@ -6471,7 +6471,7 @@ function fillMissingProperties(eachTask, targetTask) {
 	const dateSpecificFields = ['createdAt', 'updatedAt', 'syncedAt']
 	for (let key in targetTask) {
 		if (Array.isArray(targetTask[key])) {
-			if (!eachTask[key] || eachTask[key].length === 0) {
+			if (!eachTask[key]) {
 				// If the array is missing or empty, copy the entire array from the targetTask
 				eachTask[key] = [...targetTask[key]]
 			} else {
