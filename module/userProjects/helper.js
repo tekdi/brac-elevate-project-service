@@ -163,6 +163,11 @@ module.exports = class UserProjectsHelper {
 					if (data.hasOwnProperty(payloadItem)) delete data[payloadItem]
 				})
 
+				// Populated by update()'s _fillMissingTaskInformation() when siblings are merged in
+				// untouched just to avoid the $set below deleting them - not a real project field.
+				const preserveTaskTimestamps = data.__preserveTaskTimestamps
+				delete data.__preserveTaskTimestamps
+
 				if (process.env.SUBMISSION_LEVEL == 'USER') {
 					if (!(userProject[0].userId == userId)) {
 						throw {
@@ -409,6 +414,11 @@ module.exports = class UserProjectsHelper {
 
 						updateProject.tasks = userProject[0].tasks
 					}
+
+					// _projectTask() above unconditionally stamps updatedAt/syncedAt on every task/
+					// child it recurses into, including siblings that were only merged in by
+					// _fillMissingTaskInformation() to avoid the $set deleting them. Put those back.
+					_restorePreservedTaskTimestamps(updateProject.tasks, preserveTaskTimestamps)
 
 					taskReport.total = updateProject.tasks.length
 
@@ -4544,7 +4554,11 @@ module.exports = class UserProjectsHelper {
 				}
 
 				if (updateData.tasks && updateData.tasks.length > 0) {
-					updateData.tasks = _fillMissingTaskInformation(updateData.tasks, userProject[0].tasks)
+					const fillResult = _fillMissingTaskInformation(updateData.tasks, userProject[0].tasks)
+					updateData.tasks = fillResult.tasks
+					// Consumed and stripped inside sync() - not a real project field, just used to
+					// restore timestamps on sibling subtrees that were merged in untouched.
+					updateData.__preserveTaskTimestamps = fillResult.preserveMap
 
 					let allTasksFalttened = []
 					for (let eachTask of updateData.tasks) {
@@ -6442,32 +6456,77 @@ function validateAllTasks(tasks) {
 }
 
 /**
+ * Recursively records updatedAt/syncedAt of a task/child (and all of its descendants) into
+ * preserveMap, keyed by _id. Used for subtree items that are carried over from the DB untouched
+ * (purely so a partial $set doesn't delete them) so their original timestamps can be restored
+ * after _projectTask() unconditionally re-stamps everything it visits. (createdAt is not tracked
+ * here - _projectTask() only overwrites it when missing, so it's never actually mutated for these.)
+ * @param {Object} item - task/child object from the DB.
+ * @param {Map} preserveMap - map of _id -> { updatedAt, syncedAt } to populate.
+ * @returns {void}
+ */
+function _collectSubtreeTimestamps(item, preserveMap) {
+	if (!item || !item._id) return
+	preserveMap.set(item._id, { updatedAt: item.updatedAt, syncedAt: item.syncedAt })
+	if (Array.isArray(item.children)) {
+		item.children.forEach((child) => _collectSubtreeTimestamps(child, preserveMap))
+	}
+}
+
+/**
+ * Restores previously-recorded timestamps (see _collectSubtreeTimestamps) onto tasks/children
+ * whose _id is present in preserveMap - undoes the blanket updatedAt/syncedAt stamping that
+ * _projectTask() applies to every node it recurses into, for the subset of nodes that were only
+ * carried along to avoid being dropped by the $set, not actually part of the incoming update.
+ * @param {Array} tasks - tasks/children array to walk (mutated in place).
+ * @param {Map} preserveMap - map of _id -> { updatedAt, syncedAt }.
+ * @returns {void}
+ */
+function _restorePreservedTaskTimestamps(tasks, preserveMap) {
+	if (!preserveMap || preserveMap.size === 0 || !Array.isArray(tasks)) return
+	for (const task of tasks) {
+		const preserved = preserveMap.get(task._id)
+		if (preserved) {
+			task.updatedAt = preserved.updatedAt
+			task.syncedAt = preserved.syncedAt
+		}
+		if (Array.isArray(task.children) && task.children.length > 0) {
+			_restorePreservedTaskTimestamps(task.children, preserveMap)
+		}
+	}
+}
+
+/**
  * Fill missing information in tasks from database.
  * @method
  * @name _fillMissingTaskInformation
  * @param {Array} tasks - Tasks with potentially missing information.
  * @param {Array} tasksFromDB - Tasks data retrieved from the database.
- * @returns {Array} Updated tasks with missing information filled.
+ * @returns {Object} { tasks, preserveMap } - tasks with missing information filled, and a map
+ *                    of original timestamps for untouched sibling subtrees to restore later.
  */
 function _fillMissingTaskInformation(tasks, tasksFromDB) {
+	const preserveMap = new Map()
 	// Main loop to go through all tasks and fill missing properties
 	for (let eachTask of tasks) {
 		let targetTask = tasksFromDB.find((singleTask) => singleTask._id == eachTask._id)
 		if (targetTask) {
-			fillMissingProperties(eachTask, targetTask)
+			fillMissingProperties(eachTask, targetTask, preserveMap)
 		}
 	}
 
-	return tasks
+	return { tasks, preserveMap }
 }
 
 /**
  * Recursively fills missing properties in eachTask using the values from targetTask.
  * @param {Object} eachTask - The task object that may have missing properties.
  * @param {Object} targetTask - The task object from the database, used to fill missing properties.
+ * @param {Map} [preserveMap] - map of _id -> original timestamps, populated for untouched
+ *                              sibling subtrees carried over purely to avoid data loss.
  * @returns {void} This function does not return a value. It modifies eachTask in place.
  */
-function fillMissingProperties(eachTask, targetTask) {
+function fillMissingProperties(eachTask, targetTask, preserveMap) {
 	const dateSpecificFields = ['createdAt', 'updatedAt', 'syncedAt']
 	for (let key in targetTask) {
 		if (Array.isArray(targetTask[key])) {
@@ -6482,7 +6541,7 @@ function fillMissingProperties(eachTask, targetTask) {
 				eachTask[key].forEach((item) => {
 					const targetItem = targetTask[key].find((dbItem) => dbItem._id === item._id) || {}
 					const updatedItem = { ...targetItem, ...item } // Merge incoming and existing data
-					fillMissingProperties(updatedItem, targetItem)
+					fillMissingProperties(updatedItem, targetItem, preserveMap)
 					updatedArray.push(updatedItem)
 				})
 
@@ -6490,6 +6549,12 @@ function fillMissingProperties(eachTask, targetTask) {
 				const remainingItems = targetTask[key].filter(
 					(dbItem) => !eachTask[key].some((item) => item._id === dbItem._id)
 				)
+
+				// These items weren't part of the incoming request - record their original
+				// timestamps so they can be restored after _projectTask() re-stamps them.
+				if (preserveMap) {
+					remainingItems.forEach((item) => _collectSubtreeTimestamps(item, preserveMap))
+				}
 
 				eachTask[key] = [...updatedArray, ...remainingItems]
 			}
