@@ -6467,7 +6467,10 @@ function validateAllTasks(tasks) {
  */
 function _collectSubtreeTimestamps(item, preserveMap) {
 	if (!item || !item._id) return
-	preserveMap.set(item._id, { updatedAt: item.updatedAt, syncedAt: item.syncedAt })
+	// _id can be a Mongoose ObjectId instance rather than a plain string, and Map key lookups
+	// use reference equality - two ObjectId instances for the same id are not ===. Stringify so
+	// the get() in _restorePreservedTaskTimestamps() reliably matches.
+	preserveMap.set(item._id.toString(), { updatedAt: item.updatedAt, syncedAt: item.syncedAt })
 	if (Array.isArray(item.children)) {
 		item.children.forEach((child) => _collectSubtreeTimestamps(child, preserveMap))
 	}
@@ -6485,7 +6488,8 @@ function _collectSubtreeTimestamps(item, preserveMap) {
 function _restorePreservedTaskTimestamps(tasks, preserveMap) {
 	if (!preserveMap || preserveMap.size === 0 || !Array.isArray(tasks)) return
 	for (const task of tasks) {
-		const preserved = preserveMap.get(task._id)
+		if (!task || !task._id) continue
+		const preserved = preserveMap.get(task._id.toString())
 		if (preserved) {
 			task.updatedAt = preserved.updatedAt
 			task.syncedAt = preserved.syncedAt
@@ -6509,7 +6513,8 @@ function _fillMissingTaskInformation(tasks, tasksFromDB) {
 	const preserveMap = new Map()
 	// Main loop to go through all tasks and fill missing properties
 	for (let eachTask of tasks) {
-		let targetTask = tasksFromDB.find((singleTask) => singleTask._id == eachTask._id)
+		if (!eachTask || !eachTask._id) continue
+		let targetTask = tasksFromDB.find((singleTask) => singleTask && singleTask._id == eachTask._id)
 		if (targetTask) {
 			fillMissingProperties(eachTask, targetTask, preserveMap)
 		}
@@ -6531,7 +6536,12 @@ function fillMissingProperties(eachTask, targetTask, preserveMap) {
 	for (let key in targetTask) {
 		if (Array.isArray(targetTask[key])) {
 			if (!eachTask[key] || eachTask[key].length === 0) {
-				// If the array is missing or empty, copy the entire array from the targetTask
+				// If the array is missing or empty, copy the entire array from the targetTask.
+				// Every item here is untouched (none of it came from the request), so it all
+				// needs to be preserved the same way remainingItems is below.
+				if (preserveMap) {
+					targetTask[key].forEach((item) => _collectSubtreeTimestamps(item, preserveMap))
+				}
 				eachTask[key] = [...targetTask[key]]
 			} else {
 				// Merge the two arrays: existing data from DB and incoming updates
