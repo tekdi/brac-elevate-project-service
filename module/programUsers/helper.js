@@ -556,7 +556,10 @@ module.exports = class ProgramUsersHelper {
 								orgId
 							)
 
-							if (entityResult.success && userId !== parseInt(managerUserId)) {
+							if (
+								entityResult.success &&
+								(entityType === 'supervisor' || parseInt(userId) !== parseInt(managerUserId))
+							) {
 								assignedUsersWithEntities.push({
 									userId: entityResult.data[0].metaInformation.externalId,
 									name: entityResult.data[0].metaInformation.name,
