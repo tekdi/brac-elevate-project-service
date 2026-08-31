@@ -5672,7 +5672,7 @@ module.exports = class UserProjectsHelper {
 				'tasks.$.updatedAt': new Date(),
 			}
 
-			if (attachments && attachments.length > 0) {
+			if (Array.isArray(attachments)) {
 				updateFields['tasks.$.attachments'] = attachments
 			}
 
@@ -5710,7 +5710,7 @@ module.exports = class UserProjectsHelper {
 				'tasks.$[task].children.$[child].updatedAt': new Date(),
 			}
 
-			if (attachments && attachments.length > 0) {
+			if (Array.isArray(attachments)) {
 				updateFields['tasks.$[task].children.$[child].attachments'] = attachments
 			}
 
