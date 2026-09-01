@@ -192,12 +192,25 @@ module.exports = class ProgramUsersService {
 				immediateCoachId = userId
 			}
 			// Find document by userId and either programId or programExternalId
-			const docData = await this.findByUserAndProgram(
+			let docData = await this.findByUserAndProgram(
 				immediateCoachId,
 				programId,
 				programExternalId,
 				userDetails.userInformation.tenantId
 			)
+			// Fallback: If document not found for logged-in user, fetch program's document
+			if (!docData) {
+				const filterQuery = { tenantId: userDetails.userInformation.tenantId }
+				if (programId) {
+					filterQuery.programId = programId
+				} else if (programExternalId) {
+					filterQuery.programExternalId = programExternalId
+				}
+				const programUserDocs = await programUsersQueries.programUsersDocument(filterQuery, 'all', 'none')
+				if (programUserDocs && programUserDocs.length > 0) {
+					docData = programUserDocs[0]
+				}
+			}
 
 			if (!docData) {
 				return {
