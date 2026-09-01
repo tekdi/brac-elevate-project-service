@@ -191,7 +191,7 @@ module.exports = class ProgramUsersService {
 			} else {
 				immediateCoachId = userId
 			}
-			// Find document by userId and either programId or programExternalId
+
 			const docData = await this.findByUserAndProgram(
 				immediateCoachId,
 				programId,
@@ -252,48 +252,16 @@ module.exports = class ProgramUsersService {
 			const totalCount = filteredEntities.length
 			const paginatedEntities = filteredEntities.slice(skip, skip + limit)
 
-			const userIds = paginatedEntities.map((entity) => entity.userId).filter(Boolean)
-			// Fetch user details from user service
-			// Use page=1 and limit=userIds.length because entities are already paginated above;
-			// passing the original page/limit would cause the user service to paginate again and
-			// skip results (e.g. page=2 with 5 IDs would skip all 5 and return nothing).
-			const { success, data } =
-				(await userService.accountSearch(
-					userIds,
-					userDetails.userInformation.tenantId,
-					'all',
-					[],
-					searchQuery,
-					1,
-					Math.max(userIds.length, 1),
-					meta,
-					sortBy,
-					sortOrder
-				)) || {}
-
-			// Throw error if no valid users returned from service
-			if (!success || !data || data.count === 0) {
-				return {
-					success: true,
-					status: 200,
-					message: 'No valid users found for the provided entity user IDs.',
-					data: { data: [], overview: docData.overview || {} },
-					result: { data: [], overview: docData.overview || {} },
-				}
-			}
-
 			const entityHierarchy = {
 				0: immediateCoachId,
 				1: docData.hierarchy?.[0]?.id,
 			}
 
-			// Map accountSearch data with entity data from docData and filter by searchQuery
+			// Map entity data from docData without fetching userDetails from backend
 			const filteredData = paginatedEntities.map((entity) => {
-				const userData = data.data.find((user) => user.id == entity.userId)
 				return {
 					...entity,
 					hierarchy: entityHierarchy,
-					userDetails: userData || null,
 				}
 			})
 
@@ -595,7 +563,6 @@ module.exports = class ProgramUsersService {
 	static async _updateOverviewAsync(programUsersId) {
 		// Placeholder for asynchronous overview update logic
 		// This could involve recalculating summary statistics or other data
-		console.log(`[ProgramUsers] Updating overview for programUsersId: ${programUsersId}`)
 
 		try {
 			// Fetch program user document
