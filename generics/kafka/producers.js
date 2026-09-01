@@ -25,6 +25,10 @@ const pushDeletedResourceTopic =
 		? process.env.RESOURCE_DELETION_TOPIC
 		: 'resource_deletion_topic'
 const userCoursesTopic = process.env.USER_COURSES_TOPIC
+const changeRequestTopic =
+	process.env.CHANGE_REQUEST_TOPIC && process.env.CHANGE_REQUEST_TOPIC != 'OFF'
+		? process.env.CHANGE_REQUEST_TOPIC
+		: 'elevate_change_request'
 
 /**
  * Push improvement projects to kafka.
@@ -183,10 +187,35 @@ const pushUserCoursesToKafka = function (message) {
 	})
 }
 
+/**
+ * Push change request event to Kafka (created/approved/rejected notifications).
+ * @function
+ * @name pushChangeRequestEvent
+ * @param {Object} message - The message payload to be pushed to Kafka.
+ * @returns {Promise<Object>} Kafka push status response.
+ */
+const pushChangeRequestEvent = function (message) {
+	return new Promise(async (resolve, reject) => {
+		try {
+			let kafkaPushStatus = await pushMessageToKafka([
+				{
+					topic: changeRequestTopic,
+					messages: JSON.stringify(message),
+				},
+			])
+
+			return resolve(kafkaPushStatus)
+		} catch (error) {
+			return reject(error)
+		}
+	})
+}
+
 module.exports = {
 	pushProjectToKafka: pushProjectToKafka,
 	pushUserActivitiesToKafka: pushUserActivitiesToKafka,
 	pushProgramOperationEvent: pushProgramOperationEvent,
 	pushResourceDeleteKafkaEvent: pushResourceDeleteKafkaEvent,
 	pushUserCoursesToKafka: pushUserCoursesToKafka,
+	pushChangeRequestEvent: pushChangeRequestEvent,
 }

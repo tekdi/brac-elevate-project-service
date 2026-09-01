@@ -11,6 +11,7 @@ const programUsersService = require(SERVICES_BASE_PATH + '/programUsers')
 const programQueries = require(DB_QUERY_BASE_PATH + '/programs')
 const userService = require(SERVICES_BASE_PATH + '/users')
 const entityManagementService = require(SERVICES_BASE_PATH + '/entity-management')
+const changeRequestsHelper = require(MODULES_BASE_PATH + '/changeRequests/helper')
 
 /**
  * ProgramUsersHelper
@@ -398,6 +399,44 @@ module.exports = class ProgramUsersHelper {
 					success: false,
 					status: HTTP_STATUS_CODE.bad_request.status,
 					message: 'entityUpdates must be a non-empty object with named properties',
+				}
+			}
+
+			// Supervisor approval gate: LC-initiated changes to an entity that already
+			// has a pending change request are blocked. A dropout request raised by an
+			// LC is diverted to the assigned supervisor for approval instead of being
+			// applied directly.
+			const roles = userDetails.userInformation?.roles || []
+			const isLC = roles.includes(CONSTANTS.common.ORG_ADMIN)
+
+			if (isLC) {
+				const pendingRequest = await changeRequestsHelper.hasPendingRequest(
+					'PROGRAM_USER_ENTITY',
+					entityId,
+					null
+				)
+
+				if (pendingRequest) {
+					return {
+						success: false,
+						status: HTTP_STATUS_CODE.conflict.status,
+						message: 'A change is already pending approval for this item',
+					}
+				}
+
+				if (entityUpdates.status === 'DROPPED_OUT') {
+					const orgId = userDetails.userInformation?.organizationId
+
+					return await changeRequestsHelper.requestChange({
+						requestedBy: userId,
+						programId,
+						programExternalId,
+						targetType: 'PROGRAM_USER_ENTITY',
+						entityId,
+						changePayload: entityUpdates,
+						tenantId,
+						orgId,
+					})
 				}
 			}
 
