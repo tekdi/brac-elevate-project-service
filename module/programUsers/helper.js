@@ -595,13 +595,15 @@ module.exports = class ProgramUsersHelper {
 								orgId
 							)
 
-							if (entityResult.success && userId !== parseInt(managerUserId)) {
-								assignedUsersWithEntities.push({
-									userId: entityResult.data[0].metaInformation.externalId,
-									name: entityResult.data[0].metaInformation.name,
-									entityId: entityResult.data[0]._id,
-									status: assignedUsersStatus,
-								})
+							if (entityResult.success) {
+								if (userId !== parseInt(managerUserId)) {
+									assignedUsersWithEntities.push({
+										userId: entityResult.data[0].metaInformation.externalId,
+										name: entityResult.data[0].metaInformation.name,
+										entityId: entityResult.data[0]._id,
+										status: assignedUsersStatus,
+									})
+								}
 							} else {
 								throw new Error(`Failed to create entity for user: ${user.name}`)
 							}
