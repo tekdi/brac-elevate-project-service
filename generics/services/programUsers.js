@@ -194,12 +194,36 @@ module.exports = class ProgramUsersService {
 				immediateCoachId = userId
 			}
 			// Find document by userId and either programId or programExternalId
-			const docData = await this.findByUserAndProgram(
+			let docData = await this.findByUserAndProgram(
 				immediateCoachId,
 				programId,
 				programExternalId,
 				userDetails.userInformation.tenantId
 			)
+
+			if (!docData) {
+				const userRoles = userDetails.userInformation?.roles || []
+				const isAdmin = userRoles.some((role) => ['admin', 'org_admin', 'tenant_admin'].includes(role))
+
+				if (isAdmin && !entityId) {
+					const filterQuery = {
+						tenantId: userDetails.userInformation.tenantId,
+						...(programId ? { programId } : { programExternalId }),
+					}
+					const allProgramUsers = await programUsersQueries.programUsersDocument(filterQuery, 'all', 'none')
+
+					if (allProgramUsers && allProgramUsers.length > 0) {
+						const seen = new Set()
+						const allEntities = allProgramUsers
+							.flatMap((doc) => doc.entities || [])
+							.filter((entity) => {
+								const key = String(entity.entityId || entity.userId)
+								return key && !seen.has(key) && seen.add(key)
+							})
+						docData = { entities: allEntities, overview: {} }
+					}
+				}
+			}
 
 			if (!docData) {
 				return {
