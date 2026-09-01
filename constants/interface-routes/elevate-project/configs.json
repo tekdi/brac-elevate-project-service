@@ -16,7 +16,7 @@
 		},
 		{
 			"sourceRoute": "/project/v1/changeRequests/list",
-			"type": "POST",
+			"type": "GET",
 			"priority": "MUST_HAVE",
 			"inSequence": false,
 			"orchestrated": false,
