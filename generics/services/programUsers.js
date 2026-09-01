@@ -5,9 +5,11 @@
  */
 
 const { result } = require('lodash')
+const changeRequests = require('../../models/changeRequests')
 
 const programUsersQueries = require(DB_QUERY_BASE_PATH + '/programUsers')
 const userService = require(GENERICS_FILES_PATH + '/services/users')
+const changeRequestsService = require(GENERICS_FILES_PATH + '/services/changeRequests')
 
 module.exports = class ProgramUsersService {
 	/**
@@ -284,6 +286,35 @@ module.exports = class ProgramUsersService {
 				1: docData.hierarchy?.[0]?.id,
 			}
 
+			// Get list of pending Requests for the participants
+			const entityIds = paginatedEntities.map((entity) => entity.entityId).filter(Boolean)
+
+			let pendingByEntityId = new Map()
+			try {
+				const changeRequestFilters = {
+					status: 'PENDING',
+					tenantId: userDetails.userInformation.tenantId,
+				}
+				if (programId) {
+					changeRequestFilters.programId = programId
+				} else if (programExternalId) {
+					changeRequestFilters.programExternalId = programExternalId
+				}
+
+				const changesPendingForApproval = await changeRequestsService.findByEntityIds(
+					entityIds,
+					changeRequestFilters
+				)
+				for (const cr of changesPendingForApproval) {
+					const existing = pendingByEntityId.get(cr.entityId) || []
+					existing.push(cr)
+					pendingByEntityId.set(cr.entityId, existing)
+				}
+			} catch (error) {
+				// Best-effort: a changeRequests lookup failure shouldn't block the entities list.
+				console.error('[Pending ChangeRequest Lookup Error]', error.message || error)
+			}
+
 			// Map accountSearch data with entity data from docData and filter by searchQuery
 			const filteredData = paginatedEntities.map((entity) => {
 				const userData = data.data.find((user) => user.id == entity.userId)
@@ -291,6 +322,7 @@ module.exports = class ProgramUsersService {
 					...entity,
 					hierarchy: entityHierarchy,
 					userDetails: userData || null,
+					pendingChangeRequest: pendingByEntityId.get(entity.entityId) || [],
 				}
 			})
 

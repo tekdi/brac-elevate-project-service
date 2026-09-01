@@ -113,6 +113,7 @@ module.exports = async function (req, res, next, token = '') {
 		'/organizationExtension/updateRelatedOrgs',
 		'/userExtension/update',
 		'/solutions/fetchLinkInternal',
+		'/changeRequests/resolveSupervisor',
 		//'/programUsers/createOrUpdate',
 	]
 	let performInternalAccessTokenCheck = false
