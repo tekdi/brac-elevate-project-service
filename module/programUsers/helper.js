@@ -705,7 +705,7 @@ module.exports = class ProgramUsersHelper {
 			}
 			const myEntities = await programUsersService.getMyEntities(loggedInUserId, programId, tenantId)
 			if (myEntities.length > 0) {
-				const myEntity = myEntities.find((entity) => entity.userId === entityId)
+				const myEntity = myEntities.find((entity) => entity.userId === entityId || entity.entityId === entityId)
 				if (myEntity) {
 					return {
 						success: true,
@@ -764,24 +764,38 @@ module.exports = class ProgramUsersHelper {
 				}
 			}
 
-			// Check if logged-in user has this participant assigned
-			const assignmentCheck = await this.checkifEntityAssigned(loggedInUserId, entityId, programId, tenantId)
-			if (!assignmentCheck.success) {
-				return {
-					success: false,
-					status: HTTP_STATUS_CODE.forbidden.status,
-					message: assignmentCheck.message || 'You do not have permission to update this participant',
+			const isAdmin = UTILS.validateRoles(userDetails.userInformation.roles, [CONSTANTS.common.ADMIN_ROLE])
+
+			const isTenantAdmin = UTILS.validateRoles(userDetails.userInformation.roles, [
+				CONSTANTS.common.TENANT_ADMIN,
+			])
+
+			// if (isTenantAdmin && entityProgramDoc.hierarchy[1].id !== loggedInUserId) {
+			// 	return {
+			// 		success: false,
+			// 		status: HTTP_STATUS_CODE.forbidden.status,
+			// 		message: 'You do not have permission to update this participant',
+			// 	}
+			// }
+			//} else
+			//if (!isAdmin && !isTenantAdmin)
+
+			const entityProgramDoc = await programUsersService.findByUserAndProgram(entityId, programId, null, tenantId)
+			let coachUserId = null
+			if (entityProgramDoc) {
+				coachUserId = entityProgramDoc.hierarchy[0].id
+
+				if (!isAdmin && !isTenantAdmin && coachUserId != loggedInUserId) {
+					return {
+						success: false,
+						status: HTTP_STATUS_CODE.forbidden.status,
+						message: 'You do not have permission to update this participant',
+					}
 				}
 			}
 
 			// Call user service to update the participant's profile using org-admin endpoint
-			const updateResult = await userService.updateProfile(
-				assignmentCheck.entity.userId,
-				updateData,
-				userToken,
-				tenantId,
-				orgId
-			)
+			const updateResult = await userService.updateProfile(entityId, updateData, userToken, tenantId, orgId)
 
 			if (!updateResult.success) {
 				return {
@@ -790,6 +804,20 @@ module.exports = class ProgramUsersHelper {
 					message: updateResult.message || 'Failed to update participant profile',
 					error: updateResult.error,
 				}
+			}
+
+			if (coachUserId && updateData?.name) {
+				const entityUpdates = {
+					name: updateData.name,
+				}
+				const entityUpdate = programUsersService.updateEntity(
+					coachUserId,
+					programId,
+					null,
+					entityId,
+					entityUpdates,
+					tenantId
+				)
 			}
 
 			return {
