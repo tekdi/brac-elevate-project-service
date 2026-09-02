@@ -180,13 +180,6 @@ module.exports = class ProgramUsersService {
 						}
 					}
 
-					if (userId != entityDocData.hierarchy[0].id && userId != entityDocData.hierarchy[1].id) {
-						return {
-							status: 403,
-							message: 'You are not authorized to access this entity',
-						}
-					}
-
 					immediateCoachId = String(entityDocData.hierarchy[0].id)
 				}
 			} else {
