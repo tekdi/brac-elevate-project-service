@@ -159,37 +159,36 @@ module.exports = class ProgramUsersService {
 		try {
 			const skip = (page - 1) * limit
 			let immediateCoachId
+			const userRoles = userDetails.userInformation?.roles || []
+			const isAdmin = userRoles.some((role) => ['admin', 'org_admin', 'tenant_admin'].includes(role))
 			if (entityId) {
-				let checkEntityHierarchy = true
-				if (userDetails.userInformation.roles.includes('admin')) checkEntityHierarchy = false
+				if (isAdmin) {
+					immediateCoachId = entityId
+				} else {
+					const entityDocData = await this.findByUserAndProgram(
+						entityId,
+						programId,
+						programExternalId,
+						userDetails.userInformation.tenantId
+					)
 
-				const entityDocData = await this.findByUserAndProgram(
-					entityId,
-					programId,
-					programExternalId,
-					userDetails.userInformation.tenantId
-				)
-
-				if (!entityDocData) {
-					return {
-						status: 404,
-						message: 'Program user not found for given entity id',
-						data: [],
+					if (!entityDocData) {
+						return {
+							status: 404,
+							message: 'Program user not found for given entity id',
+							data: [],
+						}
 					}
-				}
 
-				if (
-					checkEntityHierarchy &&
-					userId != entityDocData.hierarchy[0].id &&
-					userId != entityDocData.hierarchy[1].id
-				) {
-					return {
-						status: 403,
-						message: 'You are not authorized to access this entity',
+					if (userId != entityDocData.hierarchy[0].id && userId != entityDocData.hierarchy[1].id) {
+						return {
+							status: 403,
+							message: 'You are not authorized to access this entity',
+						}
 					}
-				}
 
-				immediateCoachId = String(entityDocData.hierarchy[0].id)
+					immediateCoachId = String(entityDocData.hierarchy[0].id)
+				}
 			} else {
 				immediateCoachId = userId
 			}
@@ -202,9 +201,6 @@ module.exports = class ProgramUsersService {
 			)
 
 			if (!docData) {
-				const userRoles = userDetails.userInformation?.roles || []
-				const isAdmin = userRoles.some((role) => ['admin', 'org_admin', 'tenant_admin'].includes(role))
-
 				if (isAdmin && !entityId) {
 					const filterQuery = {
 						tenantId: userDetails.userInformation.tenantId,
