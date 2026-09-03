@@ -692,7 +692,10 @@ const updateProfile = function (userId, updateData, userToken, tenantCode, organ
 					if (body.responseCode === HTTP_STATUS_CODE['ok'].code) {
 						result['data'] = body.result
 					} else {
-						result.success = false
+						result = {
+							success: false,
+							...body,
+						}
 					}
 				}
 				return resolve(result)
