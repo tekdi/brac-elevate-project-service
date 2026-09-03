@@ -530,7 +530,15 @@ module.exports = class ProgramUsersHelper {
 
 			// Fetch manager and assigned users details to get their roles and entity information
 			const allUserIds = [managerUserId, ...assignedUserIds]
-			const usersResponse = await userService.accountSearch(allUserIds, tenantId)
+			const usersResponse = await userService.accountSearch(
+				allUserIds,
+				tenantId,
+				'all',
+				[],
+				null,
+				1,
+				allUserIds.length
+			)
 
 			if (!usersResponse.success || !usersResponse.data || usersResponse.data.count === 0) {
 				throw new Error('User details not found in the user service')
