@@ -182,17 +182,7 @@ module.exports = class ChangeRequestsHelper {
 			const requestorName = req.userDetails.userInformation.userName
 			const tenantId = req.userDetails.userInformation.tenantId
 			const orgId = req.userDetails.userInformation.organizationId
-			const {
-				requestees,
-				province,
-				site,
-				programId,
-				programExternalId,
-				action,
-				entityId,
-				entityName,
-				changePayload,
-			} = req.body
+			const { requestees, programId, programExternalId, action, entityId, changePayload } = req.body
 
 			const pendingRequest = await this.hasPendingRequest(action, entityId, changePayload?.projectId)
 			if (pendingRequest) {
@@ -210,15 +200,11 @@ module.exports = class ChangeRequestsHelper {
 
 			const changeRequest = await changeRequestsService.create({
 				requestorId,
-				requestorName,
-				province,
-				site,
 				requestees,
 				programId,
 				programExternalId,
 				action,
 				entityId,
-				entityName,
 				changePayload,
 				changeSummary,
 				status: 'PENDING',
@@ -291,7 +277,7 @@ module.exports = class ChangeRequestsHelper {
 			}
 
 			const { data, count } = await changeRequestsService.list(filters, parseInt(pageNo), parseInt(pageSize))
-			const enrichedData = await this._enrichWithLocationDetails(data, tenantId)
+			const enrichedData = await this._enrichWithDetails(data, tenantId, programId)
 
 			return {
 				success: true,
@@ -319,41 +305,104 @@ module.exports = class ChangeRequestsHelper {
 	 * @param {String} tenantId - tenant ID.
 	 * @returns {Array} change requests with province/site resolved to names.
 	 */
-	static async _enrichWithLocationDetails(changeRequests, tenantId) {
-		const locationIds = [
-			...new Set(
-				(changeRequests || [])
-					.flatMap((cr) => [cr.province, cr.site])
-					.filter(Boolean)
-					.map((id) => String(id))
-			),
-		]
+	static async _enrichWithDetails(changeRequests, tenantId, programId) {
+		const requestorIdSet = new Set()
+		const entitiesByRequestor = {}
+		for (const cr of changeRequests || []) {
+			if (cr.requestorId && cr.entityId) {
+				const reqId = String(cr.requestorId)
+				requestorIdSet.add(reqId)
 
-		if (!locationIds.length) {
+				if (!entitiesByRequestor[reqId]) {
+					entitiesByRequestor[reqId] = []
+				}
+				const entId = String(cr.entityId)
+				if (!entitiesByRequestor[reqId].includes(entId)) {
+					entitiesByRequestor[reqId].push(entId)
+				}
+			}
+		}
+
+		const requestorIds = [...requestorIdSet]
+
+		if (!requestorIds.length) {
 			return changeRequests
 		}
 
-		let entitiesById = new Map()
-		try {
-			const entitiesResult = await entityManagementService.entityDocuments({ _id: locationIds, tenantId }, [
-				'metaInformation.name',
-			])
-			if (entitiesResult?.success && entitiesResult?.data) {
-				entitiesById = new Map(entitiesResult.data.map((entity) => [String(entity._id), entity]))
+		const userResults = await usersService.accountSearch(requestorIds, tenantId)
+
+		if (!userResults?.success || !userResults?.data || userResults.data.count === 0) {
+			throw new Error('User details not found in the user service')
+		}
+
+		const requestors = userResults.data.data || []
+
+		const requestorsById = new Map(requestors.map((user) => [String(user.id || user._id || user.userId), user]))
+
+		const entityDetailsById = new Map()
+
+		for (const [requestorId, targetEntityIds] of Object.entries(entitiesByRequestor)) {
+			if (requestorId && targetEntityIds.length > 0) {
+				try {
+					const docData = await programUsersService.findByUserAndProgram(requestorId, programId, '', tenantId)
+
+					const userEntities = docData?.entities || []
+
+					for (const entity of userEntities) {
+						const eId = String(entity.entityId)
+						if (eId && targetEntityIds.includes(eId)) {
+							entityDetailsById.set(eId, entity.name)
+						}
+					}
+				} catch (error) {
+					console.error(`[ChangeRequest Entity Lookup Error for ${requestorId}]`, error.message || error)
+				}
 			}
-		} catch (error) {
-			// Enrichment is best-effort display data - an entity-management failure
-			// shouldn't block the list endpoint from returning the underlying change requests.
-			console.error('[ChangeRequest Location Enrichment Error]', error.message || error)
+		}
+
+		const locationIds = [
+			...new Set(
+				[...requestors.flatMap((u) => [u.meta?.province, u.meta?.site])].filter(Boolean).map((id) => String(id))
+			),
+		]
+
+		let entitiesById = new Map()
+		if (locationIds.length) {
+			try {
+				const entitiesResult = await entityManagementService.entityDocuments({ _id: locationIds, tenantId }, [
+					'metaInformation.name',
+				])
+				if (entitiesResult?.success && entitiesResult?.data) {
+					entitiesById = new Map(
+						entitiesResult.data.map((entity) => [String(entity._id), entity?.metaInformation?.name])
+					)
+				}
+			} catch (error) {
+				// Enrichment is best-effort display data - an entity-management failure
+				// shouldn't block the list endpoint from returning the underlying change requests.
+				console.error('[ChangeRequest Location Enrichment Error]', error.message || error)
+			}
 		}
 
 		return changeRequests.map((cr) => {
-			const provinceEntity = cr.province ? entitiesById.get(String(cr.province)) : null
-			const siteEntity = cr.site ? entitiesById.get(String(cr.site)) : null
+			const requestor = requestorsById.get(String(cr.requestorId))
+			const requestorName = requestor?.name || cr.requestorName || null
+
+			const provinceId = requestor?.meta?.province || null
+			const siteId = requestor?.meta?.site || null
+
+			const provinceEntity = provinceId ? entitiesById.get(String(provinceId)) : null
+			const siteEntity = siteId ? entitiesById.get(String(siteId)) : null
+
+			const targetEntity = cr.entityId ? entityDetailsById.get(String(cr.entityId)) : null
+			const entityName = targetEntity || null
+
 			return {
 				...cr,
-				province: provinceEntity?.metaInformation?.name || cr.province || null,
-				site: siteEntity?.metaInformation?.name || cr.site || null,
+				requestorName,
+				entityName,
+				province: provinceEntity,
+				site: siteEntity,
 			}
 		})
 	}

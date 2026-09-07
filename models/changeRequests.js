@@ -12,21 +12,6 @@ module.exports = {
 			required: true,
 			index: true,
 		},
-		requestorName: {
-			type: String,
-			required: true,
-			index: true,
-		},
-		province: {
-			type: String,
-			required: true,
-			index: true,
-		},
-		site: {
-			type: String,
-			required: true,
-			index: true,
-		},
 		requestees: {
 			type: [String],
 			required: true,
@@ -47,10 +32,6 @@ module.exports = {
 			index: true,
 		},
 		entityId: {
-			type: String,
-			index: true,
-		},
-		entityName: {
 			type: String,
 			index: true,
 		},
