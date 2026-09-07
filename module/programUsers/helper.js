@@ -790,14 +790,18 @@ module.exports = class ProgramUsersHelper {
 
 			const entityProgramDoc = await programUsersService.findByUserAndProgram(entityId, programId, null, tenantId)
 			let coachUserId = null
-			if (entityProgramDoc) {
-				coachUserId = entityProgramDoc.hierarchy[0].id
+			let supervisorId = null
+			if (entityProgramDoc && entityProgramDoc?.hierarchy && entityProgramDoc?.hierarchy.length > 0) {
+				if (entityProgramDoc?.hierarchy[0]?.id) coachUserId = entityProgramDoc.hierarchy[0].id
+				if (entityProgramDoc?.hierarchy[1]?.id) supervisorId = entityProgramDoc.hierarchy[1].id
 
-				if (!isAdmin && !isTenantAdmin && coachUserId != loggedInUserId) {
-					return {
-						success: false,
-						status: HTTP_STATUS_CODE.forbidden.status,
-						message: 'You do not have permission to update this participant',
+				if (!isAdmin && !isTenantAdmin) {
+					if (coachUserId != loggedInUserId && supervisorId != loggedInUserId) {
+						return {
+							success: false,
+							status: HTTP_STATUS_CODE.forbidden.status,
+							message: 'You do not have permission to update this participant',
+						}
 					}
 				}
 			}
