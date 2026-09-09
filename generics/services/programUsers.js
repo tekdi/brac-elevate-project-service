@@ -161,7 +161,9 @@ module.exports = class ProgramUsersService {
 			let immediateCoachId
 			if (entityId) {
 				let checkEntityHierarchy = true
-				if (userDetails.userInformation.roles.includes('admin')) checkEntityHierarchy = false
+				if (userDetails.userInformation.roles.includes('admin') || userId == entityId) {
+					checkEntityHierarchy = false
+				}
 
 				const entityDocData = await this.findByUserAndProgram(
 					entityId,
