@@ -162,6 +162,8 @@ module.exports = class ProgramUsersService {
 			if (entityId) {
 				let checkEntityHierarchy = true
 				if (userDetails.userInformation.roles.includes('admin')) checkEntityHierarchy = false
+				// Allow a user to view their own entity data (read-only self access)
+				if (userId == entityId) checkEntityHierarchy = false
 
 				const entityDocData = await this.findByUserAndProgram(
 					entityId,
