@@ -29,7 +29,8 @@ var messageReceived = function (message) {
       let submissionDocument = {
         "_id" : parsedMessage._id.toString(),
         "status" : parsedMessage.status,
-        "completedDate" : parsedMessage.submissionDate ? parsedMessage.submissionDate : ""
+        "completedDate" : parsedMessage.submissionDate ? parsedMessage.submissionDate : "",
+		"answers": parsedMessage.answers ? parsedMessage.answers : [],
       };
 
       await userProjectsHelper.pushSubmissionToTask(
