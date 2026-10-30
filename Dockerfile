@@ -1,4 +1,4 @@
-FROM node:20
+FROM node:24.22.1
 
 # Install necessary system dependencies for canvas
 RUN apt-get update && apt-get install -y --no-install-recommends \
