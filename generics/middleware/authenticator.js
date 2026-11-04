@@ -115,6 +115,9 @@ module.exports = async function (req, res, next, token = '') {
 		'/solutions/fetchLinkInternal',
 		'/changeRequests/resolveSupervisor',
 		'/userProjects/updateTaskFromProjectPlan',
+		'/programUsers/nudgeCandidates',
+		'/project/templates/nudgeCandidates',
+		'/changeRequests/nudgeCandidates',
 	]
 	let performInternalAccessTokenCheck = false
 	let adminHeader = false

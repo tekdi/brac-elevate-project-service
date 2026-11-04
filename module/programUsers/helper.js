@@ -12,6 +12,28 @@ const programQueries = require(DB_QUERY_BASE_PATH + '/programs')
 const userService = require(SERVICES_BASE_PATH + '/users')
 const entityManagementService = require(SERVICES_BASE_PATH + '/entity-management')
 const changeRequestsHelper = require(MODULES_BASE_PATH + '/changeRequests/helper')
+const kafkaProducersHelper = require(GENERICS_FILES_PATH + '/kafka/producers')
+const crypto = require('crypto')
+
+/**
+ * Push an event for brac-utility-service (notification emails). A failure is only logged: it must not fail the change.
+ * @param {String} eventType - event type.
+ * @param {String} tenantId - tenant code.
+ * @param {Object} data - event data.
+ */
+async function pushUtilityEvent(eventType, tenantId, data) {
+	try {
+		await kafkaProducersHelper.pushUtilityEvent({
+			eventId: crypto.randomUUID(),
+			eventType,
+			tenantCode: tenantId,
+			...data,
+			occurredAt: new Date().toISOString(),
+		})
+	} catch (error) {
+		console.error(`Failed to push ${eventType} to kafka:`, error)
+	}
+}
 
 /**
  * ProgramUsersHelper
@@ -450,6 +472,25 @@ module.exports = class ProgramUsersHelper {
 				tenantId
 			)
 
+			// Participant status changes brac-utility-service sends emails for or schedules reminders from:
+			// ONBOARDED (enrolled), IN_PROGRESS with a new IDP, COMPLETED (graduated)
+			const statusEvent = {
+				ONBOARDED: 'PARTICIPANT_ONBOARDED',
+				IN_PROGRESS: entityUpdates.idpProjectCreatedAt ? 'PARTICIPANT_IDP_CREATED' : null,
+				COMPLETED: 'PARTICIPANT_STATUS_COMPLETED',
+			}[entityUpdates.status]
+			if (statusEvent) {
+				const entity = (result?.entities || []).find((item) => String(item.entityId) === String(entityId))
+				await pushUtilityEvent(statusEvent, tenantId, {
+					programId: result?.programId ? String(result.programId) : programId,
+					coachId: String(userId),
+					participantId: entity?.userId ? String(entity.userId) : null,
+					participantName: entity?.name,
+					entityId: String(entityId),
+					idpProjectCreatedAt: entityUpdates.idpProjectCreatedAt || null,
+				})
+			}
+
 			return {
 				success: true,
 				status: 200,
@@ -458,6 +499,48 @@ module.exports = class ProgramUsersHelper {
 			}
 		} catch (error) {
 			throw error
+		}
+	}
+
+	/**
+	 * Programme users the daily nudges in brac-utility-service look at
+	 * @method
+	 * @name nudgeCandidates
+	 * @param {String} programId - program id
+	 * @param {String} tenantId - tenant code
+	 * @param {Array} [userIds] - only these users
+	 * @returns {Object} result with every programUsers document of the program in that tenant
+	 */
+	static async nudgeCandidates(programId, tenantId, userIds = []) {
+		if (!programId || !tenantId) {
+			throw {
+				status: HTTP_STATUS_CODE.bad_request.status,
+				message: 'programId and tenantId are required',
+			}
+		}
+		const filter = { programId, tenantId }
+		// Only these users, when the caller asks for a few (e.g. one coach for an event)
+		if (userIds.length) filter.userId = { $in: userIds }
+		const programUsers = await programUsersQueries.programUsersDocument(filter, [
+			'userId',
+			'status',
+			'createdAt',
+			'updatedAt',
+			'hierarchy',
+			'entities.userId',
+			'entities.name',
+			'entities.status',
+			'entities.entityId',
+			'entities.idpProjectCreatedAt',
+			'overview',
+			'metaInformation.onBoardingProjectCompletedAt',
+			'metaInformation.idpProjectId',
+		])
+		return {
+			success: true,
+			status: HTTP_STATUS_CODE.ok.status,
+			message: 'Program users fetched successfully',
+			result: programUsers,
 		}
 	}
 
@@ -672,6 +755,20 @@ module.exports = class ProgramUsersHelper {
 						throw new Error('Failed to create programUsers entry for assigned user')
 					}
 				}
+			}
+
+			// Participants assigned to a coach (NOT_ONBOARDED) or coaches assigned to a supervisor
+			if (assignedUsersWithEntities.length > 0) {
+				await pushUtilityEvent('PROGRAM_USERS_ASSIGNED', tenantId, {
+					programId: resolvedProgramId,
+					managerId: String(managerUserId),
+					assignedBy: loggedInUserId ? String(loggedInUserId) : null,
+					assignedUsersStatus,
+					assignedUsers: assignedUsersWithEntities.map((user) => ({
+						userId: String(user.userId),
+						name: user.name,
+					})),
+				})
 			}
 
 			return {
