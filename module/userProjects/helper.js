@@ -14,6 +14,7 @@ const projectCategoriesQueries = require(DB_QUERY_BASE_PATH + '/projectCategorie
 const projectTemplateQueries = require(DB_QUERY_BASE_PATH + '/projectTemplates')
 const projectTemplateTaskQueries = require(DB_QUERY_BASE_PATH + '/projectTemplateTask')
 const kafkaProducersHelper = require(GENERICS_FILES_PATH + '/kafka/producers')
+const crypto = require('crypto')
 const removeFieldsFromRequest = ['submissionDetails']
 const programsQueries = require(DB_QUERY_BASE_PATH + '/programs')
 const userService = require(GENERICS_FILES_PATH + '/services/users')
@@ -1487,6 +1488,24 @@ module.exports = class UserProjectsHelper {
 					if (progressStats.projectStatus == 'completed') {
 						updatePayload.idpProjectCompletedAt = new Date()
 						// updatePayload.status = 'COMPLETED'
+						// First time the IDP reaches 100%: tell brac-utility-service (notification email to the coach)
+						if (!entity.idpProjectCompletedAt) {
+							try {
+								await kafkaProducersHelper.pushUtilityEvent({
+									eventId: crypto.randomUUID(),
+									eventType: 'PARTICIPANT_IDP_COMPLETED',
+									tenantCode: project.tenantId,
+									programId: targetProgramId,
+									coachId: targetUserId,
+									participantId: entity.userId ? String(entity.userId) : null,
+									participantName: entity.name,
+									projectId: projectStringId,
+									occurredAt: new Date().toISOString(),
+								})
+							} catch (kafkaError) {
+								console.error('Failed to push PARTICIPANT_IDP_COMPLETED to kafka:', kafkaError)
+							}
+						}
 					}
 				}
 

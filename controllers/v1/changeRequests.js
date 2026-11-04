@@ -146,4 +146,26 @@ module.exports = class ChangeRequests extends Abstract {
 			}
 		})
 	}
+
+	/**
+	 * Pending IDP / livelihood change requests the daily nudges in brac-utility-service look at (internal access only)
+	 * @method
+	 * @name nudgeCandidates
+	 * @param {Object} req - request data.
+	 * @param {String} req.query.tenantId - tenant code.
+	 * @returns {JSON} pending USER_PROJECT_TEMPLATE_CHANGE requests of the tenant.
+	 */
+	async nudgeCandidates(req) {
+		return new Promise(async (resolve, reject) => {
+			try {
+				const result = await changeRequestsHelper.nudgeCandidates(req.query.tenantId)
+				return resolve(result)
+			} catch (error) {
+				return reject({
+					status: error.status || HTTP_STATUS_CODE.internal_server_error.status,
+					message: error.message || 'Internal server error',
+				})
+			}
+		})
+	}
 }

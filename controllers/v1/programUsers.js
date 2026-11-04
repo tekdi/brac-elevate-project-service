@@ -242,4 +242,33 @@ module.exports = class ProgramUsers extends Abstract {
 			}
 		})
 	}
+
+	/**
+	 * Programme users the daily nudges in brac-utility-service look at (internal access only)
+	 * @method
+	 * @name nudgeCandidates
+	 * @param {Object} req - request object
+	 * @param {String} req.query.programId - program id (the global LC program)
+	 * @param {String} req.query.tenantId - tenant code
+	 * @param {String} [req.query.userIds] - comma separated user ids, to fetch only these users
+	 * @returns {Object} every programUsers document of the program in that tenant (status, dates, hierarchy, entities)
+	 */
+	async nudgeCandidates(req) {
+		return new Promise(async (resolve, reject) => {
+			try {
+				const userIds = req.query.userIds ? String(req.query.userIds).split(',').filter(Boolean) : []
+				const result = await programUsersHelper.nudgeCandidates(
+					req.query.programId,
+					req.query.tenantId,
+					userIds
+				)
+				return resolve(result)
+			} catch (error) {
+				return reject({
+					status: error.status || HTTP_STATUS_CODE.internal_server_error.status,
+					message: error.message || 'Internal server error',
+				})
+			}
+		})
+	}
 }

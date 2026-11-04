@@ -1518,6 +1518,39 @@ module.exports = class ProjectTemplatesHelper {
 	}
 
 	/**
+	 * Project templates the daily nudges in brac-utility-service look at.
+	 * @method
+	 * @name nudgeCandidates
+	 * @param {String} tenantId - tenant code.
+	 * @returns {Object} every template of the tenant with how many projects were created from it.
+	 */
+	static async nudgeCandidates(tenantId) {
+		if (!tenantId) {
+			throw {
+				status: HTTP_STATUS_CODE.bad_request.status,
+				message: 'tenantId is required',
+			}
+		}
+		const templates = await projectTemplateQueries.templateDocument({ tenantId, isDeleted: false }, [
+			'_id',
+			'title',
+			'isReusable',
+			'status',
+			'createdAt',
+		])
+		const usage = await database.models.projects.aggregate([
+			{ $match: { tenantId, projectTemplateId: { $in: templates.map((template) => template._id) } } },
+			{ $group: { _id: '$projectTemplateId', count: { $sum: 1 } } },
+		])
+		const projectCount = Object.fromEntries(usage.map((item) => [String(item._id), item.count]))
+		return {
+			success: true,
+			message: 'Project templates fetched successfully',
+			data: templates.map((template) => ({ ...template, projectCount: projectCount[String(template._id)] || 0 })),
+		}
+	}
+
+	/**
 	 * Templates list.
 	 * @method
 	 * @name listByIds

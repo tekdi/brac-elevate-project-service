@@ -29,6 +29,11 @@ const changeRequestTopic =
 	process.env.CHANGE_REQUEST_TOPIC && process.env.CHANGE_REQUEST_TOPIC != 'OFF'
 		? process.env.CHANGE_REQUEST_TOPIC
 		: 'elevate_change_request'
+// Events brac-utility-service turns into notification emails; it already consumes this topic
+const utilityEventsTopic =
+	process.env.UTILITY_EVENTS_TOPIC && process.env.UTILITY_EVENTS_TOPIC != 'OFF'
+		? process.env.UTILITY_EVENTS_TOPIC
+		: 'session-enrollment-topic'
 
 /**
  * Push improvement projects to kafka.
@@ -211,6 +216,30 @@ const pushChangeRequestEvent = function (message) {
 	})
 }
 
+/**
+ * Push a programme event for brac-utility-service (notification emails).
+ * @function
+ * @name pushUtilityEvent
+ * @param {Object} message - { eventId, eventType, tenantCode, ...event data }.
+ * @returns {Promise<Object>} Kafka push status response.
+ */
+const pushUtilityEvent = function (message) {
+	return new Promise(async (resolve, reject) => {
+		try {
+			let kafkaPushStatus = await pushMessageToKafka([
+				{
+					topic: utilityEventsTopic,
+					messages: JSON.stringify(message),
+				},
+			])
+
+			return resolve(kafkaPushStatus)
+		} catch (error) {
+			return reject(error)
+		}
+	})
+}
+
 module.exports = {
 	pushProjectToKafka: pushProjectToKafka,
 	pushUserActivitiesToKafka: pushUserActivitiesToKafka,
@@ -218,4 +247,5 @@ module.exports = {
 	pushResourceDeleteKafkaEvent: pushResourceDeleteKafkaEvent,
 	pushUserCoursesToKafka: pushUserCoursesToKafka,
 	pushChangeRequestEvent: pushChangeRequestEvent,
+	pushUtilityEvent: pushUtilityEvent,
 }

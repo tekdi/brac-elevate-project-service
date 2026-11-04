@@ -925,4 +925,27 @@ module.exports = class ProjectTemplates extends Abstract {
 			}
 		})
 	}
+
+	/**
+	 * Project templates the daily nudges in brac-utility-service look at (internal access only)
+	 * @method
+	 * @name nudgeCandidates
+	 * @param {Object} req - request data.
+	 * @param {String} req.query.tenantId - tenant code.
+	 * @returns {JSON} every template of the tenant with how many projects were created from it.
+	 */
+	async nudgeCandidates(req) {
+		return new Promise(async (resolve, reject) => {
+			try {
+				const projectTemplates = await projectTemplatesHelper.nudgeCandidates(req.query.tenantId)
+				projectTemplates.result = projectTemplates.data
+				return resolve(projectTemplates)
+			} catch (error) {
+				return reject({
+					status: error.status || HTTP_STATUS_CODE.internal_server_error.status,
+					message: error.message || HTTP_STATUS_CODE.internal_server_error.message,
+				})
+			}
+		})
+	}
 }

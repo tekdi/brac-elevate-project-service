@@ -68,6 +68,32 @@ module.exports = class ChangeRequestsHelper {
 	}
 
 	/**
+	 * Pending change requests the daily nudges in brac-utility-service look at (IDP / livelihood plan changes
+	 * waiting for the supervisor).
+	 * @method
+	 * @name nudgeCandidates
+	 * @param {String} tenantId - tenant code.
+	 * @returns {Object} result with the pending USER_PROJECT_TEMPLATE_CHANGE requests of the tenant.
+	 */
+	static async nudgeCandidates(tenantId) {
+		if (!tenantId) {
+			throw { status: HTTP_STATUS_CODE.bad_request.status, message: 'tenantId is required' }
+		}
+		const pending = await database.models.changeRequests
+			.find(
+				{ tenantId, status: 'PENDING', action: 'USER_PROJECT_TEMPLATE_CHANGE' },
+				{ requestorId: 1, requestees: 1, entityId: 1, createdAt: 1 }
+			)
+			.lean()
+		return {
+			success: true,
+			status: HTTP_STATUS_CODE.ok.status,
+			message: 'Change requests fetched successfully',
+			result: pending,
+		}
+	}
+
+	/**
 	 * Resolve leaf category ids to their { pathway, category } display names,
 	 * keyed by category id for easy lookup.
 	 * pathway = root-level ancestor name, category = the leaf category name itself.
