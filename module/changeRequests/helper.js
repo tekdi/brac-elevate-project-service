@@ -360,9 +360,19 @@ module.exports = class ChangeRequestsHelper {
 			}
 		}
 
+		// province/site are now stored as arrays in user meta; flat() also keeps old string values working
+		// const locationIds = [
+		// 	...new Set(
+		// 		[...requestors.flatMap((u) => [u.meta?.province, u.meta?.site])].filter(Boolean).map((id) => String(id))
+		// 	),
+		// ]
 		const locationIds = [
 			...new Set(
-				[...requestors.flatMap((u) => [u.meta?.province, u.meta?.site])].filter(Boolean).map((id) => String(id))
+				requestors
+					.flatMap((u) => [u.meta?.province, u.meta?.site])
+					.flat()
+					.filter(Boolean)
+					.map((id) => String(id))
 			),
 		]
 
@@ -388,11 +398,20 @@ module.exports = class ChangeRequestsHelper {
 			const requestor = requestorsById.get(String(cr.requestorId))
 			const requestorName = requestor?.name || cr.requestorName || null
 
-			const provinceId = requestor?.meta?.province || null
-			const siteId = requestor?.meta?.site || null
+			// const provinceId = requestor?.meta?.province || null
+			// const siteId = requestor?.meta?.site || null
+			// const provinceEntity = provinceId ? entitiesById.get(String(provinceId)) : null
+			// const siteEntity = siteId ? entitiesById.get(String(siteId)) : null
 
-			const provinceEntity = provinceId ? entitiesById.get(String(provinceId)) : null
-			const siteEntity = siteId ? entitiesById.get(String(siteId)) : null
+			// Multiple province/site names are joined with a comma so the response stays a string
+			const namesFor = (ids) =>
+				[]
+					.concat(ids || [])
+					.map((id) => entitiesById.get(String(id)))
+					.filter(Boolean)
+					.join(', ') || null
+			const provinceEntity = namesFor(requestor?.meta?.province)
+			const siteEntity = namesFor(requestor?.meta?.site)
 
 			const targetEntity = cr.entityId ? entityDetailsById.get(String(cr.entityId)) : null
 			const entityName = targetEntity || null
