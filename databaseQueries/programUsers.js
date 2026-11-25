@@ -431,6 +431,37 @@ module.exports = class programUsers {
 					})
 				}
 
+				// Mirror the entity updates onto the entity's own programUsers document
+				// (userId = entityId, same programId and tenantId). Merge via dot-notation so
+				// existing metaInformation is preserved; status is set at the top level.
+				try {
+					const entityUserId = entity.userId
+					if (entityUserId) {
+						const entitySetOps = {}
+						Object.keys(updates).forEach((key) => {
+							if (!/^\d+$/.test(key)) {
+								entitySetOps[`metaInformation.${key}`] = updates[key]
+							}
+						})
+						if (updates.status) {
+							entitySetOps.status = updates.status
+						}
+						if (Object.keys(entitySetOps).length > 0) {
+							entitySetOps.updatedAt = new Date()
+							await database.models.programUsers.updateOne(
+								{
+									userId: entityUserId.toString(),
+									programId: result.programId,
+									tenantId: result.tenantId,
+								},
+								{ $set: entitySetOps }
+							)
+						}
+					}
+				} catch (syncError) {
+					console.error('updateEntity - failed to sync entity document:', syncError.message || syncError)
+				}
+
 				return resolve(result)
 			} catch (error) {
 				console.error('updateEntity - Exception caught:', {
