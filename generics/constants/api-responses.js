@@ -334,4 +334,18 @@ module.exports = {
 	CATEGORY_NOT_FOUND_IN_PROJECT: 'Category does not exist in project',
 	PATHWAY_CANNOT_BE_CHANGED:
 		'Pathway cannot be changed because one or more tasks in this pillar have already been completed',
+	IDP_TEMPLATE_ADMIN_ONLY: 'Only admin can view or edit IDP templates',
+	IDP_TEMPLATE_CATEGORIES_FETCHED: 'IDP template categories fetched successfully',
+	IDP_TEMPLATE_CATEGORY_UPDATED: 'Category updated successfully',
+	IDP_TEMPLATE_TASK_UPDATED: 'Task updated successfully',
+	IDP_TEMPLATE_INVALID_ID: 'Invalid id provided',
+	IDP_TEMPLATE_NOTHING_TO_UPDATE: 'Provide at least one of the editable fields to update',
+	IDP_TEMPLATE_NAME_REQUIRED: 'Name cannot be empty',
+	IDP_TEMPLATE_INVALID_STATUS: 'Status must be active or inactive',
+	IDP_TEMPLATE_TASK_CREATED: 'Task added successfully',
+	IDP_TEMPLATE_INVALID_TASK_TYPE: 'Task type must be training, additional_service, asset or empty',
+	IDP_TEMPLATE_INVALID_SESSION_CATEGORY:
+		'Session category must be social_empowerment, financial_inclusion, livelihoods or empty',
+	IDP_TEMPLATE_TASKS_REORDERED: 'Task order saved successfully',
+	IDP_TEMPLATE_TASK_ORDER_MISMATCH: 'Send every task of the template exactly once in the new order',
 }
